@@ -95,6 +95,8 @@ export const DigitalTicket: React.FC<DigitalTicketProps> = ({ ticket, showAction
         <div className="festival-ticket-art">
           <img
             src="/dhandiya-night-poster.jpeg"
+            srcSet="/dhandiya-night-poster.webp 900w"
+            sizes="(max-width: 768px) 90vw, 600px"
             alt="Dhandiya Night festival artwork"
             loading="lazy"
           />

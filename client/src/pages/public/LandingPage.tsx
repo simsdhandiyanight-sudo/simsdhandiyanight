@@ -138,8 +138,11 @@ export const LandingPage: React.FC = () => {
           <img
             className="festival-sponsor__logo"
             src="/avr-sponsor.png"
+            srcSet="/avr-sponsor.webp"
+            sizes="min(900px, 90vw)"
             alt="AVR Cine Max"
             loading="lazy"
+            decoding="async"
           />
         </section>
 
@@ -159,7 +162,14 @@ export const LandingPage: React.FC = () => {
                 className={`festival-experience-card festival-experience-card--${className} festival-reveal`}
                 style={{ transitionDelay: `${index * 90}ms` }}
               >
-                <img src={image} alt={alt} loading="lazy" />
+                <img
+                  src={image}
+                  srcSet={`${image.replace(/\.png$/, '.webp')} 768w`}
+                  sizes="(max-width: 768px) 90vw, 380px"
+                  alt={alt}
+                  loading="lazy"
+                  decoding="async"
+                />
               </article>
             ))}
           </div>

@@ -15,10 +15,13 @@ export const FestivalPoster: React.FC<FestivalPosterProps> = ({
     <div className="festival-poster__frame">
       <img
         src="/dhandiya-night-festival-celebration.png"
+        srcSet="/dhandiya-night-festival-celebration.webp 1280w"
+        sizes="(max-width: 768px) 100vw, 940px"
         alt="Dhandiya Night festival celebration at Soundarya Institute"
         className={`festival-poster__image ${imageClassName}`}
         loading={priority ? 'eager' : 'lazy'}
         fetchPriority={priority ? 'high' : 'auto'}
+        decoding={priority ? 'sync' : 'async'}
       />
     </div>
   </figure>

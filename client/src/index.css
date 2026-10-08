@@ -612,7 +612,7 @@ textarea {
   content: '';
   background-image:
     linear-gradient(180deg, rgba(255, 248, 229, 0.12), rgba(255, 244, 216, 0.22)),
-    url('/dhandiya-background-desktop.png');
+    url('/dhandiya-background-desktop.webp');
   background-position: center top;
   background-size: cover;
   background-repeat: no-repeat;
@@ -704,7 +704,7 @@ textarea {
   .festival-public::before {
     background-image:
       linear-gradient(180deg, rgba(255, 248, 229, 0.12), rgba(255, 244, 216, 0.2)),
-      url('/dhandiya-background-mobile.png');
+      url('/dhandiya-background-mobile.webp');
     background-position: center top;
     background-size: cover;
   }
@@ -2700,7 +2700,7 @@ textarea {
   align-items: center;
   margin: -0.2rem auto 0;
   padding: 8.5% 9% 8%;
-  background: url('/ornate-golden-festival-frame.png') center / 100% 100% no-repeat;
+  background: url('/ornate-golden-festival-frame.webp') center / 100% 100% no-repeat;
   filter: drop-shadow(0 16px 24px rgba(62, 43, 22, 0.19));
 }
 
@@ -2911,7 +2911,7 @@ textarea {
     margin-top: 0.9rem;
     padding: 16% 16% 16%;
     border: 0;
-    background: url('/ornate-golden-diwali-frame-overlay-mobile.png') center / contain no-repeat;
+    background: url('/ornate-golden-diwali-frame-overlay-mobile.webp') center / contain no-repeat;
     filter: drop-shadow(0 12px 18px rgba(62, 43, 22, 0.16));
   }
 
@@ -3006,7 +3006,7 @@ textarea {
     min-height: 0;
     padding: 16% 16%;
     border: 0;
-    background: url('/ornate-golden-diwali-frame-overlay-mobile.png') center / contain no-repeat;
+    background: url('/ornate-golden-diwali-frame-overlay-mobile.webp') center / contain no-repeat;
   }
 
   .festival-home-invitation__details {

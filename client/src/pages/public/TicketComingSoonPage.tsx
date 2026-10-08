@@ -6,7 +6,7 @@ export const TicketComingSoonPage: React.FC = () => {
       className="flex min-h-screen flex-col items-center justify-center px-4 py-8 text-center text-[#1d2b50]"
       style={{
         backgroundColor: '#fffaf0',
-        backgroundImage: "linear-gradient(rgba(255, 250, 240, 0.3), rgba(255, 250, 240, 0.3)), url('/festive-garba-celebration-backdrop.png')",
+        backgroundImage: "linear-gradient(rgba(255, 250, 240, 0.3), rgba(255, 250, 240, 0.3)), url('/festive-garba-celebration-backdrop.webp')",
         backgroundPosition: 'center',
         backgroundSize: 'cover',
       }}
@@ -14,6 +14,8 @@ export const TicketComingSoonPage: React.FC = () => {
       <div className="flex w-full max-w-xl flex-col items-center gap-6 rounded-3xl border border-[#d8bd7c]/80 bg-[#fffaf0]/90 p-4 shadow-2xl backdrop-blur-sm sm:p-6">
         <img
           src="/dhandiya-night-poster.jpeg"
+          srcSet="/dhandiya-night-poster.webp 900w"
+          sizes="(max-width: 768px) 90vw, 576px"
           alt="Dhandiya Night event poster"
           className="h-auto w-full rounded-2xl border border-[#d8bd7c] shadow-xl"
           fetchPriority="high"

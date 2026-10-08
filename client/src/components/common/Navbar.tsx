@@ -47,7 +47,7 @@ export const Navbar: React.FC = () => {
     <header className={`festival-nav fixed z-40${scrolled ? ' festival-nav--scrolled' : ''}`}>
       <div className="festival-nav__inner">
         <Link to="/" className="festival-nav__sims" aria-label="Soundarya Institute of Management and Science home">
-          <img src="/sims-logo.png" alt="SIMS" />
+          <img src="/sims-logo.png" srcSet="/sims-logo.webp" alt="SIMS" />
         </Link>
 
         <nav className="festival-nav__links" aria-label="Main navigation">
@@ -58,6 +58,7 @@ export const Navbar: React.FC = () => {
           <img
             className="festival-nav__daksha"
             src="/daksha-student-council-emblem.png"
+            srcSet="/daksha-student-council-emblem.webp"
             alt="Daksha Student Council"
           />
           <button

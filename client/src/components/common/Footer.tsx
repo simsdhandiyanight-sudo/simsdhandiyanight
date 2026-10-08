@@ -11,6 +11,7 @@ export const Footer: React.FC = () => {
             <img
               className="festival-footer__brand-logo"
               src="/sims-logo.png"
+              srcSet="/sims-logo.webp"
               alt="Soundarya Institute of Management and Science logo"
             />
             <div className="festival-footer__brand-copy">

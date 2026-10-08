@@ -12,7 +12,11 @@ export const AboutPage: React.FC = () => (
       <section className="about-intro" aria-labelledby="about-title">
         <div className="about-intro__inner">
           <div className="about-intro__identity">
-            <img src="/sims-logo.png" alt="Soundarya Institute of Management and Science logo" />
+            <img
+              src="/sims-logo.png"
+              srcSet="/sims-logo.webp"
+              alt="Soundarya Institute of Management and Science logo"
+            />
             <span className="about-eyebrow">A place to learn, lead &amp; thrive</span>
           </div>
           <div className="about-intro__copy">
@@ -41,7 +45,11 @@ export const AboutPage: React.FC = () => (
         <div className="about-daksha__inner">
           <div className="about-daksha__heading">
             <div className="about-daksha__logo">
-              <img src="/daksha-student-council-emblem.png" alt="Daksha Student Council emblem" />
+              <img
+                src="/daksha-student-council-emblem.png"
+                srcSet="/daksha-student-council-emblem.webp"
+                alt="Daksha Student Council emblem"
+              />
             </div>
             <p className="about-eyebrow">STUDENT LIFE AT SIMS</p>
             <h2 id="daksha-title">Meet <em>DAKSHA</em></h2>
