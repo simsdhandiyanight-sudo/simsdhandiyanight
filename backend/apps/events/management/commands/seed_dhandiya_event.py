@@ -68,16 +68,36 @@ class Command(BaseCommand):
                 "perks": ["One Dandiya Night admission"],
             },
             {
-                "slug": "combo-buy-3-get-1",
-                "name": "Combo Offer — Buy 3, Get 1 Free",
-                "price": "447.00",
-                "admission_count": 4,
-                "description": "Four admissions for the configured combo price.",
-                "perks": ["Four independently scannable admissions"],
+                "slug": "combo-buy-5-get-1",
+                "legacy_slug": "combo-buy-3-get-1",
+                "name": "Combo Offer — Buy 5, Get 1 Free",
+                "price": "745.00",
+                "admission_count": 6,
+                "description": "Six admissions for the configured combo price.",
+                "perks": ["Six independently scannable admissions"],
             },
         )
         for tier in tiers:
-            TicketTier.objects.get_or_create(event=event, slug=tier["slug"], defaults=tier)
+            tier = tier.copy()
+            legacy_slug = tier.pop("legacy_slug", None)
+            existing = TicketTier.objects.filter(event=event, slug=tier["slug"]).first()
+            if existing is None and legacy_slug:
+                TicketTier.objects.filter(event=event, slug=legacy_slug).update(
+                    is_available=False
+                )
+
+            if existing is None:
+                TicketTier.objects.create(event=event, **tier)
+                continue
+
+            for field, value in tier.items():
+                setattr(existing, field, value)
+            existing.save()
+
+            if legacy_slug:
+                TicketTier.objects.filter(event=event, slug=legacy_slug).update(
+                    is_available=False
+                )
 
         self.stdout.write(
             self.style.SUCCESS(

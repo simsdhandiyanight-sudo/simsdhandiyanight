@@ -154,9 +154,9 @@ One registration represents one buyer/order and may contain one or more admissio
 The Dhandiya Night offers currently configured in the product UI are:
 
 - Single Ticket: one admission for ₹149 before applicable taxes.
-- Combo Offer: three paid admissions plus one included admission, for four independently scannable tickets at ₹447 before applicable taxes.
+- Combo Offer: five paid admissions plus one included admission, for six independently scannable tickets at ₹745 before applicable taxes.
 
-Event capacity is consumed per admission/ticket, so a combo consumes four places. The buyer/contact may be shared by the order. A combo registration requires all four attendee names: the buyer's name is the first attendee name, and three additional attendee names are required. Buyer email and phone are collected once and shared across the order. Each generated ticket carries its own attendee name.
+Event capacity is consumed per admission/ticket, so a combo consumes six places. The buyer/contact may be shared by the order. A combo registration requires all six attendee names: the buyer's name is the first attendee name, and five additional attendee names are required. Buyer email and phone are collected once and shared across the order. Each generated ticket carries its own attendee name.
 
 ---
 
@@ -181,7 +181,7 @@ ISSUED -> CANCELLED  through authorized cancellation
 
 # 9. Payment and Tax
 
-The displayed ticket offer prices are in INR: ₹149 for one admission and ₹447 before applicable taxes for the four-admission combo. The application integrates Razorpay TEST/SANDBOX orders with persisted idempotency and backend verification. Online tickets are issued only after the provider confirms a captured payment with matching order, amount, and currency. Payment/order state, registration state, and each ticket's admission state are distinct.
+The displayed ticket offer prices are in INR: ₹149 for one admission and ₹745 before applicable taxes for the six-admission combo. The application integrates Razorpay TEST/SANDBOX orders with persisted idempotency and backend verification. Online tickets are issued only after the provider confirms a captured payment with matching order, amount, and currency. Payment/order state, registration state, and each ticket's admission state are distinct.
 
 Live Razorpay verification and settlement are deferred pending organization merchant/bank credentials. Tax applicability and calculation remain undefined. Sandbox validation is not production-readiness evidence.
 

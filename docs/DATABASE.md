@@ -137,7 +137,7 @@ The canonical Dhandiya Night 2026 production event uses UUID `8b3f7a20-6e8d-4b91
 ---
 
 ## TicketTier
-Represents an event's configured ticket offer, including its name, price, and currency. The Dhandiya Night offers are a single admission and a four-admission combo.
+Represents an event's configured ticket offer, including its name, price, and currency. The Dhandiya Night offers are a single admission and a six-admission combo.
 
 Typical offer information:
 
@@ -150,7 +150,7 @@ admission_count
 availability
 ```
 
-For Dhandiya Night, prices are INR 149 for one admission and INR 447 before applicable taxes for a four-admission combo. Payment amounts are persisted in minor currency units from the selected offer; no tax amount is currently calculated or stored. `admission_count` describes the admissions issued for one selected offer; capacity is reserved while a payment order is pending and consumed for each resulting ticket.
+For Dhandiya Night, prices are INR 149 for one admission and INR 745 before applicable taxes for a six-admission combo. Payment amounts are persisted in minor currency units from the selected offer; no tax amount is currently calculated or stored. `admission_count` describes the admissions issued for one selected offer; capacity is reserved while a payment order is pending and consumed for each resulting ticket.
 
 ---
 
@@ -301,7 +301,7 @@ One Ticket
 Many Scan Attempts
 ```
 
-For the Dhandiya Night combo, one buyer/order contains four tickets, each scannable independently. A single-ticket offer contains one ticket. Do not use a one-to-one Registration–Ticket relationship.
+For the Dhandiya Night combo, one buyer/order contains six tickets, each scannable independently. A single-ticket offer contains one ticket. Do not use a one-to-one Registration–Ticket relationship.
 
 ---
 

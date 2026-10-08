@@ -271,7 +271,7 @@ export const EventDetailPage: React.FC = () => {
                         <div className="pt-2 border-t border-slate-900 flex justify-between items-center text-[11px] text-slate-500 font-mono">
                           <span>
                             {tier.available > 0
-                              ? tier.admissionCount === 4
+                              ? (tier.admissionCount ?? 1) > 1
                                 ? `${tier.available} combo offers left`
                                 : `${tier.available} tickets left`
                               : 'Sold out'}

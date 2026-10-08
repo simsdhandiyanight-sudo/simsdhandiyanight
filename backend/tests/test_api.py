@@ -19,7 +19,7 @@ from apps.payments.delivery import process_next_ticket_email
 from apps.payments.models import EmailDailyUsage, Payment, PaymentIntent, TicketDelivery
 from apps.registrations.models import Registration
 from apps.scanning.models import Gate, StaffAssignment, TicketScan
-from apps.registrations.services import create_registration
+from apps.registrations.services import RegistrationConflict, create_registration
 from apps.tickets.models import Ticket
 from razorpay.errors import BadRequestError
 from tests.payment_fakes import FakeRazorpayClient
@@ -39,9 +39,55 @@ class CanonicalEventSeedTests(TestCase):
         event = Event.objects.get(slug="dhandiya-night-2026")
         self.assertEqual(Event.objects.filter(slug="dhandiya-night-2026").count(), 1)
         self.assertEqual(
-            set(event.tiers.values_list("slug", flat=True)),
-            {"single-ticket", "combo-buy-3-get-1"},
+            set(event.tiers.filter(is_available=True).values_list("slug", flat=True)),
+            {"single-ticket", "combo-buy-5-get-1"},
         )
+        combo = event.tiers.get(slug="combo-buy-5-get-1")
+        self.assertEqual(combo.name, "Combo Offer — Buy 5, Get 1 Free")
+        self.assertEqual(str(combo.price), "745.00")
+        self.assertEqual(combo.admission_count, 6)
+        response = APIClient().get("/api/v1/events/dhandiya-night-2026/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            {tier["name"] for tier in response.data["tiers"]},
+            {"Single Ticket", "Combo Offer — Buy 5, Get 1 Free"},
+        )
+
+    def test_seed_retires_legacy_combo_and_creates_new_tier(self):
+        event = Event.objects.create(
+            id="8b3f7a20-6e8d-4b91-a462-9c5d2f1e7043",
+            slug="dhandiya-night-2026",
+            name="Dhandiya Night 2026",
+            start_at=timezone.now() + timedelta(days=1),
+            end_at=timezone.now() + timedelta(days=1, hours=3),
+            venue="Soundarya College Campus",
+            city="Bengaluru",
+            address="Test address",
+            status=Event.Status.OPEN,
+            registration_open=True,
+            capacity=2500,
+        )
+        old_combo = TicketTier.objects.create(
+            event=event,
+            slug="combo-buy-3-get-1",
+            name="Combo Offer — Buy 3, Get 1 Free",
+            price="447.00",
+            admission_count=4,
+        )
+
+        call_command("seed_dhandiya_event")
+
+        old_combo.refresh_from_db()
+        new_combo = event.tiers.get(slug="combo-buy-5-get-1")
+        self.assertEqual(old_combo.slug, "combo-buy-3-get-1")
+        self.assertEqual(old_combo.name, "Combo Offer — Buy 3, Get 1 Free")
+        self.assertEqual(str(old_combo.price), "447.00")
+        self.assertEqual(old_combo.admission_count, 4)
+        self.assertFalse(old_combo.is_available)
+        self.assertEqual(new_combo.name, "Combo Offer — Buy 5, Get 1 Free")
+        self.assertEqual(str(new_combo.price), "745.00")
+        self.assertEqual(new_combo.admission_count, 6)
+        self.assertEqual(event.tiers.count(), 3)
 
 
 class AdminBootstrapTests(TestCase):
@@ -167,6 +213,67 @@ class TicketingApiTests(TestCase):
         }
         payload.update(overrides)
         return payload
+
+    def test_six_admission_combo_registration_creates_six_tickets(self):
+        combo = TicketTier.objects.create(
+            event=self.event,
+            slug="combo-six",
+            name="Combo Offer — Buy 5, Get 1 Free",
+            price="745.00",
+            admission_count=6,
+        )
+        names = [f"Attendee {index}" for index in range(1, 7)]
+
+        registration, tickets = create_registration(
+            event_id=self.event.id,
+            tier_id=combo.id,
+            buyer={
+                "name": names[0],
+                "email": "combo@example.test",
+                "phone": "+919876543210",
+            },
+            attendee_names=names,
+            source=Registration.Source.ON_SPOT,
+            created_by=self.registration_staff,
+        )
+
+        self.assertEqual(registration.ticket_tier.admission_count, 6)
+        self.assertEqual([ticket.attendee_name for ticket in tickets], names)
+
+    def test_retired_tier_is_unavailable_for_new_orders_but_existing_payment_can_finish(self):
+        retired_combo = TicketTier.objects.create(
+            event=self.event,
+            slug="combo-retired",
+            name="Retired combo",
+            price="447.00",
+            admission_count=4,
+            is_available=False,
+        )
+        buyer = {
+            "name": "Attendee One",
+            "email": "combo@example.test",
+            "phone": "+919876543210",
+        }
+        names = ["Attendee One", "Attendee Two", "Attendee Three", "Attendee Four"]
+
+        with self.assertRaises(RegistrationConflict):
+            create_registration(
+                event_id=self.event.id,
+                tier_id=retired_combo.id,
+                buyer=buyer,
+                attendee_names=names,
+                source=Registration.Source.ON_SPOT,
+            )
+
+        _, tickets = create_registration(
+            event_id=self.event.id,
+            tier_id=retired_combo.id,
+            buyer=buyer,
+            attendee_names=names,
+            source=Registration.Source.ON_SPOT,
+            exclude_payment_intent_id=uuid.uuid4(),
+        )
+        self.assertEqual(len(tickets), 4)
 
     def payment_order(self, payload, key, provider):
         return self.client.post(

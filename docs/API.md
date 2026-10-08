@@ -359,7 +359,7 @@ On-spot creation is staff-authorized:
 POST /api/v1/registrations/on-spot/
 ```
 
-Public online creation uses the payment-order and verification flow in section 14; direct public `POST /api/v1/registrations/` is blocked with `402 PAYMENT_REQUIRED`. One completed registration represents one buyer/order and may return one or more tickets. Each returned ticket has its own ID, attendee name, and opaque QR token; a combo returns four tickets. For a four-admission combo, include exactly four valid `attendee_names`. The buyer name is the first attendee name, and the buyer email and phone are shared once on the registration.
+Public online creation uses the payment-order and verification flow in section 14; direct public `POST /api/v1/registrations/` is blocked with `402 PAYMENT_REQUIRED`. One completed registration represents one buyer/order and may return one or more tickets. Each returned ticket has its own ID, attendee name, and opaque QR token; the current combo returns six tickets. Include exactly one valid `attendee_names` entry per admission in the selected offer. The buyer name is the first attendee name, and the buyer email and phone are shared once on the registration.
 
 ---
 
@@ -390,7 +390,7 @@ Example:
 }
 ```
 
-For a four-admission offer, `attendee_names` must contain four valid names. The backend derives price, currency, event, and admission count from the selected ticket offer; a client cannot supply payment success or ticket status.
+For the six-admission combo, `attendee_names` must contain six valid names. The backend derives price, currency, event, and admission count from the selected ticket offer; a client cannot supply payment success or ticket status.
 
 The first order response is `201 Created`; a retry with the same key and normalized request reuses the existing payment intent/order and returns `200 OK`. Reusing the key with a different request returns `409 Conflict`.
 
@@ -421,7 +421,7 @@ Direct public `POST /api/v1/registrations/` returns `402 PAYMENT_REQUIRED`; it c
 
 The Dhandiya Night canonical event UUID is `8b3f7a20-6e8d-4b91-a462-9c5d2f1e7043`, with slug `dhandiya-night-2026`. The public landing page uses hardcoded descriptive content; event detail and ticket availability are loaded from the backend API. Render seeds the canonical event and ticket tiers at startup. Do not use the frontend demo ID `evt-technova-2026` as the production event primary key.
 
-Configured offer amounts are ₹149 for one admission and ₹447 before applicable taxes for four combo admissions. Tax amounts and calculations are not defined. Live Razorpay verification and settlement handling remain deferred; refunds are unsupported. Do not treat this TEST/SANDBOX integration as production readiness.
+Configured offer amounts are ₹149 for one admission and ₹745 before applicable taxes for six combo admissions. Tax amounts and calculations are not defined. Live Razorpay verification and settlement handling remain deferred; refunds are unsupported. Do not treat this TEST/SANDBOX integration as production readiness.
 
 ---
 

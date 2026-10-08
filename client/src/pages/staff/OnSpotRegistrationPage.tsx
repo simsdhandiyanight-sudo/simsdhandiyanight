@@ -50,6 +50,7 @@ export const OnSpotRegistrationPage: React.FC = () => {
   const submittingRef = useRef(false);
   const [showFullPass, setShowFullPass] = useState(false);
   const selectedTier = activeEvent?.tiers.find((tier) => tier.id === tierId);
+  const selectedAdmissionCount = selectedTier?.admissionCount ?? 1;
   const eventUnavailableMessage = eventLoadError || (loadingEvent
     ? 'Loading event details…'
     : !activeEvent
@@ -66,11 +67,11 @@ export const OnSpotRegistrationPage: React.FC = () => {
     e.preventDefault();
     if (submittingRef.current) return;
     if (!activeEvent || !tierId || !name.trim()) return;
-    const names = selectedTier?.admissionCount === 4
-      ? [name.trim(), ...attendeeNames.slice(0, 3).map((attendeeName) => attendeeName.trim())]
+    const names = selectedTier && selectedAdmissionCount > 1
+      ? [name.trim(), ...attendeeNames.slice(0, selectedAdmissionCount - 1).map((attendeeName) => attendeeName.trim())]
       : [name.trim()];
     if (names.some((attendeeName) => !attendeeName)) {
-      setErrorMessage('Enter a name for each of the four combo tickets.');
+      setErrorMessage(`Enter a name for each of the ${selectedAdmissionCount} combo tickets.`);
       return;
     }
     submittingRef.current = true;
@@ -85,7 +86,7 @@ export const OnSpotRegistrationPage: React.FC = () => {
           phone: phone.trim(),
           organization: organization.trim() || undefined,
         },
-        attendeeNames: selectedTier?.admissionCount === 4 ? names : undefined,
+        attendeeNames: selectedTier && selectedAdmissionCount > 1 ? names : undefined,
         tierId,
         source: 'ON_SPOT',
       });
@@ -253,16 +254,16 @@ export const OnSpotRegistrationPage: React.FC = () => {
                 </div>
               </div>
 
-              {selectedTier?.admissionCount === 4 && (
+              {selectedTier && selectedAdmissionCount > 1 && (
                 <fieldset className="space-y-3 rounded-xl border border-slate-800 p-4">
-                  <legend className="px-2 text-xs font-semibold text-slate-200">Names for all four combo tickets</legend>
+                  <legend className="px-2 text-xs font-semibold text-slate-200">Names for all {selectedAdmissionCount} combo tickets</legend>
                   <p className="text-[11px] text-slate-400">The buyer's email and mobile number are shared across the tickets.</p>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <div>
                       <label className="mb-1 block text-[11px] font-semibold text-slate-300">Attendee 1 name</label>
                       <p className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-white">{name || 'Enter the name above'}</p>
                     </div>
-                    {Array.from({ length: 3 }, (_, index) => (
+                    {Array.from({ length: selectedAdmissionCount - 1 }, (_, index) => (
                       <div key={index}>
                         <label htmlFor={`onsite-attendee-${index + 2}`} className="mb-1 block text-[11px] font-semibold text-slate-300">
                           Attendee {index + 2} name *

@@ -70,7 +70,7 @@ class PublicEventSerializer(serializers.ModelSerializer):
     def get_tiers(self, event):
         self.context["active_ticket_count"] = getattr(event, "active_ticket_count", 0)
         return TicketTierPublicSerializer(
-            event.tiers.all(),
+            event.tiers.filter(is_available=True),
             many=True,
             context=self.context,
         ).data

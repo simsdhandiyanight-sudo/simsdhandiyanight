@@ -9,7 +9,7 @@ This document records decisions needed to move the current Dhandiya Night demo t
 - A `Registration` is the buyer's order/registration record. It belongs to one event and holds the buyer/contact details, registration source, and the selected ticket offer.
 - One registration can contain one or more `Ticket` records. The relationship is one-to-many: `Registration 1 -> Ticket 1..N`.
 - The buyer/contact details are stored once on the registration; they are not copied to every ticket.
-- Every combo registration requires the name of each of its four attendees. The existing buyer name is the first attendee's name; three additional attendee names are collected. Buyer email and phone are collected once and shared across the order.
+- Every combo registration requires the name of each of its six attendees. The existing buyer name is the first attendee's name; five additional attendee names are collected. Buyer email and phone are collected once and shared across the order.
 - Each ticket stores its own attendee name so its QR credential and gate scan identify the specific attendee. Ticket names do not duplicate buyer email or phone.
 - Every ticket is an independent admission credential with its own stable ID, unique opaque QR token, status, and scan history. Tickets in the same order can be scanned independently.
 - Capacity is measured in admissions/tickets, not orders. A combo consumes four admissions.
@@ -22,11 +22,11 @@ This document records decisions needed to move the current Dhandiya Night demo t
 
 **DECIDED**
 
-- The current configured offers are one Single Ticket for ₹149 before applicable taxes, and one Combo Offer for ₹447 before applicable taxes.
-- The combo covers four admissions: three paid admissions and one included free admission. One buyer/contact may purchase/register the combo; the backend creates four independently scannable tickets under that registration.
+- The current configured offers are one Single Ticket for ₹149 before applicable taxes, and one Combo Offer for ₹745 before applicable taxes.
+- The combo covers six admissions: five paid admissions and one included free admission. One buyer/contact may purchase/register the combo; the backend creates six independently scannable tickets under that registration.
 - The combo consumes four units of event admission capacity. The offer itself is one purchasable package; package availability and admission capacity are distinct quantities.
 - The buyer's registration is not a substitute for the four ticket credentials. Entry is validated per ticket.
-- Combo registration is blocked unless all four attendee names are supplied; buyer email and phone remain single shared contact fields.
+- Combo registration is blocked unless all six attendee names are supplied; buyer email and phone remain single shared contact fields.
 
 **UNRESOLVED**
 
@@ -62,7 +62,7 @@ This document records decisions needed to move the current Dhandiya Night demo t
 
 **DECIDED**
 
-- The ticket-offer prices currently specified in the product UI are ₹149 for one admission and ₹447 for the four-admission combo, before applicable taxes; the currency is INR.
+- The ticket-offer prices currently specified in the product UI are ₹149 for one admission and ₹745 for the six-admission combo, before applicable taxes; the currency is INR.
 - The Razorpay TEST/SANDBOX integration persists payment intents and payment attempts. Online tickets are issued only after backend signature and provider verification confirms a captured payment matching the order amount and currency.
 - Payment state, registration state, and individual ticket state are separate concepts. A browser callback cannot establish payment success or failure; ticket creation requires backend payment verification.
 - A verified payment creates one registration, the corresponding tickets and QR tokens, and a retryable backend PDF/email delivery record.

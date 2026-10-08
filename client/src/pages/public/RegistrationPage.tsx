@@ -115,6 +115,7 @@ export const RegistrationPage: React.FC = () => {
   }
 
   const selectedTier = event.tiers.find((t) => t.id === selectedTierId) || event.tiers[0];
+  const selectedAdmissionCount = selectedTier?.admissionCount ?? 1;
   const availablePackages = (tier: typeof event.tiers[number]) =>
     Math.min(tier.available, Math.floor((event.capacity - event.registeredCount) / (tier.admissionCount ?? 1)));
   const registrationAvailable =
@@ -179,11 +180,11 @@ export const RegistrationPage: React.FC = () => {
   };
 
   const handleReviewTier = () => {
-    if (selectedTier?.admissionCount === 4) {
-      const names = [fullName, ...attendeeNames.slice(0, 3)];
+    if (selectedTier && selectedAdmissionCount > 1) {
+      const names = [fullName, ...attendeeNames.slice(0, selectedAdmissionCount - 1)];
       const hasInvalidName = names.some((name) => getFieldError('fullName', name));
       if (hasInvalidName) {
-        setErrorMessage('Enter a valid name for each of the four attendees.');
+        setErrorMessage(`Enter a valid name for each of the ${selectedAdmissionCount} attendees.`);
         return;
       }
     }
@@ -227,8 +228,8 @@ export const RegistrationPage: React.FC = () => {
           jobTitle: buyer.job_title,
         },
         attendeeNames:
-          selectedTier.admissionCount === 4
-            ? [fullName, ...attendeeNames.slice(0, 3)]
+          selectedAdmissionCount > 1
+            ? [fullName, ...attendeeNames.slice(0, selectedAdmissionCount - 1)]
             : [fullName],
       };
       const order = await paymentsApi.createOrder(registrationParams);
@@ -656,7 +657,7 @@ export const RegistrationPage: React.FC = () => {
                     <p className="pl-7 text-xs text-slate-400">{tier.description}</p>
                     <p className="pl-7 pt-1 text-[10px] font-mono text-slate-500">
                       {availablePackages(tier) > 0
-                        ? `${availablePackages(tier)} ${tier.admissionCount === 4 ? 'combo offers' : 'tickets'} available`
+                        ? `${availablePackages(tier)} ${(tier.admissionCount ?? 1) > 1 ? 'combo offers' : 'tickets'} available`
                         : 'SOLD OUT'}
                     </p>
 
@@ -675,20 +676,20 @@ export const RegistrationPage: React.FC = () => {
               })}
             </div>
 
-            {selectedTier?.admissionCount === 4 && (
+            {selectedTier && selectedAdmissionCount > 1 && (
               <section className="mt-6 border-t border-slate-800 pt-5" aria-labelledby="combo-attendees-heading">
                 <h3 id="combo-attendees-heading" className="text-sm font-bold text-white">
                   Attendee names <span className="text-rose-400">*</span>
                 </h3>
                 <p className="mt-1 text-xs text-slate-400">
-                  Enter the name for each of the four individual tickets. Buyer email and mobile are shared.
+                  Enter the name for each of the {selectedAdmissionCount} individual tickets. Buyer email and mobile are shared.
                 </p>
                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
                   <div>
                     <label className="mb-1.5 block text-xs font-semibold text-slate-300">Attendee 1 name</label>
                     <p className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-2.5 text-xs text-white">{fullName}</p>
                   </div>
-                  {Array.from({ length: 3 }, (_, index) => (
+                  {Array.from({ length: selectedAdmissionCount - 1 }, (_, index) => (
                     <div key={index}>
                       <label htmlFor={`combo-attendee-${index + 2}`} className="mb-1.5 block text-xs font-semibold text-slate-300">
                         Attendee {index + 2} name <span className="text-rose-400">*</span>
@@ -794,7 +795,9 @@ export const RegistrationPage: React.FC = () => {
 
               <div className="pt-3 border-t border-slate-800 flex justify-between items-center text-xs">
                 <span className="text-slate-400">
-                  {selectedTier.admissionCount === 4 ? '3 tickets + 1 free • before tax' : 'Total • before tax'}
+                  {selectedAdmissionCount > 1
+                    ? `${selectedAdmissionCount - 1} tickets + 1 free • before tax`
+                    : 'Total • before tax'}
                 </span>
                 <span className="text-lg font-bold font-mono text-white">
                   ₹{selectedTier.price} + applicable taxes

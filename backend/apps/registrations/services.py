@@ -47,7 +47,7 @@ def create_registration(
     except TicketTier.DoesNotExist as error:
         raise RegistrationConflict("The selected ticket offer is unavailable.") from error
 
-    if not tier.is_available:
+    if not tier.is_available and exclude_payment_intent_id is None:
         raise RegistrationConflict("The selected ticket offer is unavailable.")
 
     names = attendee_names or [buyer["name"]]
