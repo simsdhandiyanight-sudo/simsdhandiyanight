@@ -22,6 +22,18 @@ The public landing and event detail pages display hardcoded event information
 without requiring this seed, but online registration and staff operations
 remain unavailable until the backend event and ticket offers are created.
 
+### Initial Render administrator
+
+The Render startup command runs `bootstrap_admin` after migrations and event
+seeding. Set `BOOTSTRAP_ADMIN_PASSWORD` as a secret in the Render web service
+environment before deploying. The configured `BOOTSTRAP_ADMIN_EMAIL` defaults
+to `admin@sims.in`. On first startup, the command creates that administrator;
+it never changes the password of an existing administrator and refuses to
+promote an existing non-admin account. Once Render confirms the first
+successful deployment, remove `BOOTSTRAP_ADMIN_PASSWORD` from the service
+environment and redeploy to disable future bootstrapping. Do not put the
+password in source control or logs.
+
 ## Staff accounts and panel access
 
 Create staff accounts individually in Django admin at `/admin/` using an

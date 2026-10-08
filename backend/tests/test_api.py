@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import hmac
+import os
 import uuid
 from datetime import timedelta
 from unittest.mock import Mock, patch
@@ -41,6 +42,39 @@ class CanonicalEventSeedTests(TestCase):
             set(event.tiers.values_list("slug", flat=True)),
             {"single-ticket", "combo-buy-3-get-1"},
         )
+
+
+class AdminBootstrapTests(TestCase):
+    def test_bootstrap_creates_admin_and_does_not_reset_existing_password(self):
+        user_model = get_user_model()
+        with patch.dict(
+            os.environ,
+            {
+                "BOOTSTRAP_ADMIN_EMAIL": "admin@sims.in",
+                "BOOTSTRAP_ADMIN_PASSWORD": "Bootstrap-test-password-1!",
+            },
+        ):
+            call_command("bootstrap_admin")
+            admin = user_model.objects.get(email="admin@sims.in")
+            self.assertTrue(admin.is_superuser)
+            self.assertTrue(admin.is_staff)
+            self.assertEqual(admin.role, user_model.Role.ADMIN)
+            self.assertTrue(admin.check_password("Bootstrap-test-password-1!"))
+
+            admin.set_password("Rotated-test-password-2!")
+            admin.save(update_fields=["password"])
+            call_command("bootstrap_admin")
+
+        admin.refresh_from_db()
+        self.assertTrue(admin.check_password("Rotated-test-password-2!"))
+
+    def test_bootstrap_skips_when_no_credentials_are_configured(self):
+        with patch.dict(
+            os.environ, {"BOOTSTRAP_ADMIN_EMAIL": "admin@sims.in"}, clear=True
+        ):
+            call_command("bootstrap_admin")
+
+        self.assertFalse(get_user_model().objects.exists())
 
 
 @override_settings(

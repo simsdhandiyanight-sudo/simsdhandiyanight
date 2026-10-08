@@ -5,7 +5,7 @@ services:
     rootDir: backend
     plan: starter
     buildCommand: pip install -r requirements.txt && python manage.py collectstatic --no-input
-    startCommand: python manage.py migrate --noinput && python manage.py seed_dhandiya_event && gunicorn config.wsgi:application --bind 0.0.0.0:$PORT
+    startCommand: python manage.py migrate --noinput && python manage.py seed_dhandiya_event && python manage.py bootstrap_admin && gunicorn config.wsgi:application --bind 0.0.0.0:$PORT
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.10
@@ -41,6 +41,12 @@ services:
         value: Soundarya Institute
       - key: BREVO_WEBHOOK_TOKEN
         sync: false
+      - key: BOOTSTRAP_ADMIN_EMAIL
+        value: admin@sims.in
+      - key: BOOTSTRAP_ADMIN_PASSWORD
+        sync: false
+      - key: BOOTSTRAP_ADMIN_NAME
+        value: SIMS Admin
 
   - type: worker
     name: sims-dhandiya-email-worker
