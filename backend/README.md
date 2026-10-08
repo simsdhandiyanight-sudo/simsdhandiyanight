@@ -62,9 +62,9 @@ Deploy `client/` as the Vercel project root. Set the build-time
 `VITE_API_BASE_URL` to `https://<render-service-host>/api/v1`; it is a public
 API URL, not a secret. On Render, set `CORS_ALLOWED_ORIGINS` and
 `CSRF_TRUSTED_ORIGINS` to the exact HTTPS Vercel origin, including the
-production Vercel hostname. Set the same-site cookie flags to secure and
-`SameSite=None` as shown in the Blueprint so credentialed API and CSRF
-requests can cross origins. Browser privacy settings that block third-party
+production Vercel hostname. Production Django settings enforce secure cookies
+with `SameSite=None` so credentialed API and CSRF requests can cross origins.
+Browser privacy settings that block third-party
 cookies can prevent session-based staff/admin use across separate Vercel and
 Render sites; verify sign-in in the browsers used by event staff.
 
