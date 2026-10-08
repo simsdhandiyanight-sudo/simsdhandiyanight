@@ -4,6 +4,15 @@ import { ApiEvent, mapEvent } from './serializers';
 
 export const FEATURED_EVENT_SLUG = 'dhandiya-night-2026';
 
+export interface AdminEventContext {
+  id: string;
+  slug: string;
+  capacity: number;
+  status: EventItem['status'];
+  formattedDate: string;
+  tiers: Pick<EventItem['tiers'][number], 'id' | 'name' | 'price'>[];
+}
+
 export const eventsApi = {
   getAll: async (): Promise<EventItem[]> => {
     const events = await apiRequest<ApiEvent[]>('/events/');
@@ -19,6 +28,9 @@ export const eventsApi = {
       throw error;
     }
   },
+
+  getAdminContext: (slug: string) =>
+    apiRequest<AdminEventContext>(`/events/admin-context/${encodeURIComponent(slug)}/`),
 
   update: async (event: EventItem): Promise<EventItem> => {
     const updated = await apiRequest<ApiEvent>(

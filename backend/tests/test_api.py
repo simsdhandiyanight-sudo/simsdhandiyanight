@@ -354,6 +354,29 @@ class TicketingApiTests(TestCase):
         self.assertEqual(response.data["registeredCount"], 0)
         self.assertEqual(response.data["tiers"][0]["admissionCount"], 4)
 
+    def test_admin_event_context_avoids_public_ticket_aggregates(self):
+        self.client.force_authenticate(user=self.admin)
+
+        with self.assertNumQueries(2):
+            response = self.client.get(
+                f"/api/v1/events/admin-context/{self.event.slug}/"
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["id"], str(self.event.id))
+        self.assertEqual(response.data["capacity"], self.event.capacity)
+        self.assertEqual(
+            {tier["id"] for tier in response.data["tiers"]},
+            {str(self.single.id), str(self.combo.id)},
+        )
+
+    def test_admin_event_context_requires_admin_access(self):
+        response = self.client.get(
+            f"/api/v1/events/admin-context/{self.event.slug}/"
+        )
+
+        self.assertEqual(response.status_code, 401)
+
     def test_online_combo_creates_four_independently_scannable_tickets(self):
         response = self.create_online_registration(self.combo)
         self.assertEqual(response.status_code, 200, response.data)

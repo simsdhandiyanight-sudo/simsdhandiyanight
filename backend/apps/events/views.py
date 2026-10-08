@@ -1,16 +1,17 @@
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_protect
 from rest_framework import serializers, status
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsAdministrator
 from apps.tickets.models import Ticket
 from .models import Event
-from .serializers import AdminEventSerializer, PublicEventSerializer
+from .serializers import AdminEventSerializer, PublicEventSerializer, ordinal_day
 
 
 def public_events_queryset():
@@ -78,3 +79,45 @@ class EventDetailView(APIView):
         event = serializer.save()
         event = public_events_queryset().get(pk=event.pk)
         return Response(PublicEventSerializer(event).data)
+
+
+class AdminEventContextView(APIView):
+    permission_classes = [IsAuthenticated, IsAdministrator]
+
+    def get(self, request, event_slug):
+        event = get_object_or_404(
+            Event.objects.only(
+                "id",
+                "slug",
+                "capacity",
+                "status",
+                "registration_open",
+                "start_at",
+            ),
+            slug=event_slug,
+        )
+        event_date = timezone.localtime(event.start_at).date()
+        tiers = event.tiers.filter(is_available=True).values("id", "name", "price")
+        return Response(
+            {
+                "id": str(event.id),
+                "slug": event.slug,
+                "capacity": event.capacity,
+                "status": (
+                    "upcoming"
+                    if event.status == Event.Status.OPEN and not event.registration_open
+                    else event.status.lower()
+                ),
+                "formattedDate": (
+                    f"{ordinal_day(event_date.day)} {event_date.strftime('%B %Y')}"
+                ),
+                "tiers": [
+                    {
+                        "id": str(tier["id"]),
+                        "name": tier["name"],
+                        "price": float(tier["price"]),
+                    }
+                    for tier in tiers
+                ],
+            }
+        )

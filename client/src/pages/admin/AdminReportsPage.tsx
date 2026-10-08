@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { eventsApi, FEATURED_EVENT_SLUG } from '../../api/events';
+import { AdminEventContext, eventsApi, FEATURED_EVENT_SLUG } from '../../api/events';
 import { reportsApi } from '../../api/reports';
-import { EventItem, EventReport } from '../../types';
+import { EventReport } from '../../types';
 import { AdminLayout } from '../../components/admin/AdminLayout';
 import { StatCard } from '../../components/admin/StatCard';
 import {
@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 
 export const AdminReportsPage: React.FC = () => {
-  const [activeEvent, setActiveEvent] = useState<EventItem | null>(null);
+  const [activeEvent, setActiveEvent] = useState<AdminEventContext | null>(null);
   const [report, setReport] = useState<EventReport | null>(null);
   const [loadError, setLoadError] = useState('');
 
@@ -23,8 +23,7 @@ export const AdminReportsPage: React.FC = () => {
     let active = true;
     const load = async () => {
       try {
-        const event = await eventsApi.getById(FEATURED_EVENT_SLUG);
-        if (!event) throw new Error('The event is not available from the events service.');
+        const event = await eventsApi.getAdminContext(FEATURED_EVENT_SLUG);
         const eventReport = await reportsApi.getEventReport(event.id);
         if (active) {
           setActiveEvent(event);
@@ -58,7 +57,9 @@ export const AdminReportsPage: React.FC = () => {
     }
   };
 
-  const totalRegistered = activeEvent?.registeredCount || 0;
+  const totalRegistered = report?.ticket_statuses
+    .filter((item) => item.status !== 'CANCELLED')
+    .reduce((total, item) => total + item.count, 0) ?? 0;
   const totalCheckedIn = report?.ticket_statuses.find((item) => item.status === 'USED')?.count ?? 0;
   const attendanceRate = totalRegistered > 0 ? Math.round((totalCheckedIn / totalRegistered) * 100) : 0;
   const gateSummaries = report?.gates ?? [];

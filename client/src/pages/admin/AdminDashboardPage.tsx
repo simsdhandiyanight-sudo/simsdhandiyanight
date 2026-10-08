@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { eventsApi, FEATURED_EVENT_SLUG } from '../../api/events';
+import { AdminEventContext, eventsApi, FEATURED_EVENT_SLUG } from '../../api/events';
 import { reportsApi } from '../../api/reports';
 import { scansApi } from '../../api/scans';
-import { DashboardSummary, EventItem, ScanRecord } from '../../types';
+import { DashboardSummary, ScanRecord } from '../../types';
 import { AdminLayout } from '../../components/admin/AdminLayout';
 import { StatCard } from '../../components/admin/StatCard';
 import {
@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 
 export const AdminDashboardPage: React.FC = () => {
-  const [event, setEvent] = useState<EventItem | null>(null);
+  const [event, setEvent] = useState<AdminEventContext | null>(null);
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [scans, setScans] = useState<ScanRecord[]>([]);
   const [loadError, setLoadError] = useState('');
@@ -25,8 +25,7 @@ export const AdminDashboardPage: React.FC = () => {
     let active = true;
     const load = async () => {
       try {
-        const currentEvent = await eventsApi.getById(FEATURED_EVENT_SLUG);
-        if (!currentEvent) throw new Error('The event is not available from the events service.');
+        const currentEvent = await eventsApi.getAdminContext(FEATURED_EVENT_SLUG);
         const [currentSummary, recentScans] = await Promise.all([
           reportsApi.getDashboardSummary(currentEvent.id),
           scansApi.getPage({ eventId: currentEvent.id, page: 1 }),

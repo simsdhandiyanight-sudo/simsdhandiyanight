@@ -23,8 +23,7 @@ export const AdminScansPage: React.FC = () => {
     const timer = window.setTimeout(async () => {
       setLoadError('');
       try {
-        const event = await eventsApi.getById(FEATURED_EVENT_SLUG);
-        if (!event) throw new Error('The event is not available from the events service.');
+        const event = await eventsApi.getAdminContext(FEATURED_EVENT_SLUG);
         const [response, currentSummary] = await Promise.all([
           scansApi.getPage({
             page,
