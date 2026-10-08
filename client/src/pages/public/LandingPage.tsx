@@ -133,6 +133,16 @@ export const LandingPage: React.FC = () => {
           </a>
         </section>
 
+        <section className="festival-sponsor" aria-labelledby="festival-sponsor-title">
+          <p id="festival-sponsor-title" className="festival-sponsor__title">Sponsored by</p>
+          <img
+            className="festival-sponsor__logo"
+            src="/avr-sponsor.png"
+            alt="AVR Cine Max"
+            loading="lazy"
+          />
+        </section>
+
         <section id="celebration" className="festival-experience">
           <div className="festival-experience__ornament festival-experience__ornament--left" aria-hidden="true" />
           <div className="festival-experience__ornament festival-experience__ornament--right" aria-hidden="true" />

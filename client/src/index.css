@@ -2846,6 +2846,34 @@ textarea {
   margin-top: 1.15rem;
 }
 
+.festival-sponsor {
+  display: flex;
+  min-height: 190px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 1.5rem 1rem;
+  border-top: 1px solid rgba(190, 145, 53, 0.3);
+  border-bottom: 1px solid rgba(190, 145, 53, 0.3);
+  background: linear-gradient(180deg, #fff9eb, #fff3dc);
+}
+
+.festival-sponsor__title {
+  color: #9d4c0b;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.festival-sponsor__logo {
+  display: block;
+  width: min(100%, 260px);
+  max-height: 115px;
+  object-fit: contain;
+}
+
 @media (max-width: 640px) {
   .festival-public .festival-home-hero {
     padding: 6.5rem 0.9rem 1rem;
