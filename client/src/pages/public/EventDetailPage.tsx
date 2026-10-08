@@ -1,14 +1,18 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { eventsApi, FEATURED_EVENT_SLUG } from '../../api/events';
 import { Navbar } from '../../components/common/Navbar';
 import { Footer } from '../../components/common/Footer';
 import { FestivalMotifs } from '../../components/common/FestivalMotifs';
 import { FestivalPoster } from '../../components/common/FestivalPoster';
 import { FEATURED_EVENT } from '../../mock/featuredEvent';
+import { EventItem } from '../../types';
 import {
   Calendar,
   Clock,
   MapPin,
   CheckCircle2,
+  ArrowRight,
   ChevronDown,
   ChevronUp,
 
@@ -17,7 +21,33 @@ import {
 
 export const EventDetailPage: React.FC = () => {
   const [openFaq, setOpenFaq] = useState<number | null>(0);
-  const event = FEATURED_EVENT;
+  const [event, setEvent] = useState<EventItem>(FEATURED_EVENT);
+  const [registrationAvailable, setRegistrationAvailable] = useState(false);
+  const [eventApiError, setEventApiError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    eventsApi.getById(FEATURED_EVENT_SLUG).then((backendEvent) => {
+      if (cancelled) return;
+      if (!backendEvent) {
+        setEventApiError('Ticketing is not configured on the server yet.');
+        return;
+      }
+      setEvent(backendEvent);
+      setRegistrationAvailable(
+        backendEvent.status === 'open'
+        && backendEvent.tiers.some((tier) => tier.available > 0),
+      );
+    }).catch((error: unknown) => {
+      if (cancelled) return;
+      setEventApiError(
+        error instanceof Error
+          ? `Unable to check ticket availability: ${error.message}`
+          : 'Unable to check ticket availability.',
+      );
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   return (
     <div className="festival-public min-h-screen flex flex-col bg-slate-950 text-slate-100">
@@ -36,7 +66,9 @@ export const EventDetailPage: React.FC = () => {
                     Soundarya Institute
                   </span>
                   <span className="text-slate-600">·</span>
-                  <span className="font-mono text-indigo-300">EVENT INFORMATION</span>
+                  <span className={`font-mono ${registrationAvailable ? 'text-emerald-400' : 'text-indigo-300'}`}>
+                    {registrationAvailable ? '● REGISTRATION OPEN' : 'EVENT INFORMATION'}
+                  </span>
                 </div>
 
                 <h1 className="text-3xl sm:text-5xl lg:text-6xl font-display font-extrabold text-white tracking-tight leading-[1.1] text-balance">
@@ -76,9 +108,19 @@ export const EventDetailPage: React.FC = () => {
 
                 {/* Main CTA */}
                 <div className="flex flex-wrap items-center gap-4 pt-2">
-                  <p className="text-sm text-slate-400">
-                    Online registration will be available once ticketing is configured.
-                  </p>
+                  {registrationAvailable ? (
+                    <Link
+                      to={`/register/${event.slug}`}
+                      className="px-8 py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold text-sm tracking-wide shadow-lg shadow-indigo-600/30 transition-all hover:translate-y-[-1px] inline-flex items-center gap-2 uppercase"
+                    >
+                      <span>Reserve your pass</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </Link>
+                  ) : (
+                    <p role={eventApiError ? 'status' : undefined} className="text-sm text-slate-400">
+                      {eventApiError || 'Checking ticket availability…'}
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -220,7 +262,7 @@ export const EventDetailPage: React.FC = () => {
                         <div className="flex items-center justify-between">
                           <span className="font-semibold text-sm text-white">{tier.name}</span>
                           <span className="font-mono font-bold text-sm text-indigo-300">
-                            ₹{tier.price} + tax
+                            ₹{tier.price}
                           </span>
                         </div>
                         <p className="text-xs text-slate-400 leading-relaxed">
@@ -228,16 +270,34 @@ export const EventDetailPage: React.FC = () => {
                         </p>
                         <div className="pt-2 border-t border-slate-900 flex justify-between items-center text-[11px] text-slate-500 font-mono">
                           <span>
-                            {tier.admissionCount === 4 ? 'Four admissions' : 'Single admission'}
+                            {tier.available > 0
+                              ? tier.admissionCount === 4
+                                ? `${tier.available} combo offers left`
+                                : `${tier.available} tickets left`
+                              : 'Sold out'}
                           </span>
+                          {registrationAvailable && tier.available > 0 && (
+                            <Link
+                              to={`/register/${event.slug}?tier=${tier.id}`}
+                              className="text-indigo-400 hover:text-indigo-300 font-semibold"
+                            >
+                              Select Tier &rarr;
+                            </Link>
+                          )}
                         </div>
                       </div>
                     ))}
                   </div>
 
-                  <p className="text-xs text-center text-slate-400">
-                    Ticket sales will be enabled after backend event setup.
-                  </p>
+                  {registrationAvailable && (
+                    <Link
+                      to={`/register/${event.slug}`}
+                      className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-md shadow-indigo-600/30 transition-all"
+                    >
+                      <span>REGISTER NOW</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </Link>
+                  )}
                 </div>
 
                 <div className="p-4 bg-slate-900/60 border border-slate-800/80 rounded-2xl text-xs text-slate-400 space-y-2">

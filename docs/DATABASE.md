@@ -132,7 +132,7 @@ updated_at
 
 The exact fields should follow the implemented requirements.
 
-The canonical Dhandiya Night 2026 production event uses UUID `8b3f7a20-6e8d-4b91-a462-9c5d2f1e7043` and slug `dhandiya-night-2026`. Do not use the frontend demo ID `evt-technova-2026` as its production primary key. Render currently migrates the database schema but does not seed this event; the public landing and event-detail pages use hardcoded display data. Registration and staff operations require the canonical event and its approved ticket offers to be created in the database. Seed data must not include mock attendees, tickets, scans, or staff users.
+The canonical Dhandiya Night 2026 production event uses UUID `8b3f7a20-6e8d-4b91-a462-9c5d2f1e7043` and slug `dhandiya-night-2026`. Do not use the frontend demo ID `evt-technova-2026` as its production primary key. Render runs the idempotent event seed command after schema migrations so ticket registration and staff operations have the canonical event and approved ticket offers. Seed data must not include mock attendees, tickets, scans, or staff users.
 
 ---
 

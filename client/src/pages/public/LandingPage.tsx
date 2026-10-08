@@ -117,9 +117,10 @@ export const LandingPage: React.FC = () => {
             </div>
             <p className="festival-home-invitation__tagline">Dance <i>•</i> Dandiya <i>•</i> Dhamaka</p>
             <div className="festival-home-invitation__actions">
-              <span className="festival-invitation-button opacity-70" aria-disabled="true">
-                Registration opening soon
-              </span>
+              <Link to="/register/dhandiya-night-2026" className="festival-invitation-button">
+                <span>Register Now</span>
+                <ArrowRight aria-hidden="true" />
+              </Link>
               <Link to={eventPath} className="festival-home-invitation__secondary">
                 Event Details
               </Link>
@@ -186,9 +187,9 @@ export const LandingPage: React.FC = () => {
           <div className="festival-last-call__content festival-reveal">
             <p>THE DANCE FLOOR IS CALLING</p>
             <h2>Be part of the <em>celebration.</em></h2>
-            <span className="festival-invitation-button festival-invitation-button--light opacity-70" aria-disabled="true">
-              Registration opening soon
-            </span>
+            <Link to="/register/dhandiya-night-2026" className="festival-invitation-button festival-invitation-button--light">
+              <span>Register Now</span><ArrowRight aria-hidden="true" />
+            </Link>
           </div>
           <span className="festival-last-call__flower festival-last-call__flower--right" aria-hidden="true">✿</span>
         </section>

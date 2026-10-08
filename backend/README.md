@@ -47,10 +47,8 @@ does not embed a localhost fallback in the application bundle.
 The repository-root `render.yaml` defines a Django web service and a separate
 Render Background Worker. In Render, create the services from that Blueprint.
 The web service installs the backend requirements, collects static files,
-runs database schema migrations at startup, then starts Gunicorn. It does not
-seed event records. The public landing and event detail pages use hardcoded
-display data; online registration and staff operations require the canonical
-event and ticket tiers to be created in the backend database. The worker runs
+runs database schema migrations and idempotently seeds the canonical event and
+ticket tiers at startup, then starts Gunicorn. The worker runs
 `python manage.py process_ticket_emails --loop` against the same database. Do
 not run the email command as a Vercel Cron job.
 

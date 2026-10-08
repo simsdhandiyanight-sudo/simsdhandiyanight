@@ -419,7 +419,7 @@ Payment verification is the only financial action supported by this application.
 
 Direct public `POST /api/v1/registrations/` returns `402 PAYMENT_REQUIRED`; it cannot issue online tickets. Authorized on-spot registration continues through its protected endpoint and does not use Razorpay.
 
-The Dhandiya Night canonical event UUID is `8b3f7a20-6e8d-4b91-a462-9c5d2f1e7043`, with slug `dhandiya-night-2026`. The public landing and event-detail pages currently use hardcoded display data and do not require an event record in the database. Registration, payment, and staff operations still require this event and its ticket tiers in the backend database. Do not use the frontend demo ID `evt-technova-2026` as the production event primary key.
+The Dhandiya Night canonical event UUID is `8b3f7a20-6e8d-4b91-a462-9c5d2f1e7043`, with slug `dhandiya-night-2026`. The public landing page uses hardcoded descriptive content; event detail and ticket availability are loaded from the backend API. Render seeds the canonical event and ticket tiers at startup. Do not use the frontend demo ID `evt-technova-2026` as the production event primary key.
 
 Configured offer amounts are ₹149 for one admission and ₹447 before applicable taxes for four combo admissions. Tax amounts and calculations are not defined. Live Razorpay verification and settlement handling remain deferred; refunds are unsupported. Do not treat this TEST/SANDBOX integration as production readiness.
 
