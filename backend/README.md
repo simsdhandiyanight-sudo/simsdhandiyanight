@@ -34,6 +34,13 @@ successful deployment, remove `BOOTSTRAP_ADMIN_PASSWORD` from the service
 environment and redeploy to disable future bootstrapping. Do not put the
 password in source control or logs.
 
+If the administrator already exists and needs a password reset, set
+`BOOTSTRAP_ADMIN_PASSWORD` to the new secret and temporarily set
+`BOOTSTRAP_ADMIN_RESET_PASSWORD` to `true` in Render. After confirming the
+deployment log reports an updated administrator password, immediately remove
+the password secret and reset flag, then redeploy. The flag only resets the
+password for the configured email when that account is already an administrator.
+
 ## Staff accounts and panel access
 
 Create staff accounts individually in Django admin at `/admin/` using an

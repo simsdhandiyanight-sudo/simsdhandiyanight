@@ -68,6 +68,27 @@ class AdminBootstrapTests(TestCase):
         admin.refresh_from_db()
         self.assertTrue(admin.check_password("Rotated-test-password-2!"))
 
+    def test_bootstrap_resets_existing_admin_password_only_when_explicitly_enabled(self):
+        user_model = get_user_model()
+        admin = user_model.objects.create_superuser(
+            email="admin@sims.in",
+            password="Old-test-password-1!",
+            name="SIMS Admin",
+        )
+        with patch.dict(
+            os.environ,
+            {
+                "BOOTSTRAP_ADMIN_EMAIL": "admin@sims.in",
+                "BOOTSTRAP_ADMIN_PASSWORD": "New-test-password-2!",
+                "BOOTSTRAP_ADMIN_RESET_PASSWORD": "true",
+            },
+        ):
+            call_command("bootstrap_admin")
+
+        admin.refresh_from_db()
+        self.assertTrue(admin.check_password("New-test-password-2!"))
+        self.assertFalse(admin.check_password("Old-test-password-1!"))
+
     def test_bootstrap_skips_when_no_credentials_are_configured(self):
         with patch.dict(
             os.environ, {"BOOTSTRAP_ADMIN_EMAIL": "admin@sims.in"}, clear=True

@@ -11,6 +11,10 @@ class Command(BaseCommand):
         email = os.environ.get("BOOTSTRAP_ADMIN_EMAIL", "").strip().lower()
         password = os.environ.get("BOOTSTRAP_ADMIN_PASSWORD", "")
         name = os.environ.get("BOOTSTRAP_ADMIN_NAME", "SIMS Admin").strip()
+        reset_password = (
+            os.environ.get("BOOTSTRAP_ADMIN_RESET_PASSWORD", "").strip().lower()
+            == "true"
+        )
 
         if not password:
             self.stdout.write("Admin bootstrap skipped; BOOTSTRAP_ADMIN_PASSWORD is not set.")
@@ -32,6 +36,13 @@ class Command(BaseCommand):
                     f"Cannot bootstrap admin: an account already exists for {email} "
                     "but is not an administrator."
                 )
+            if reset_password:
+                existing_user.set_password(password)
+                existing_user.save(update_fields=["password"])
+                self.stdout.write(
+                    self.style.SUCCESS(f"Updated administrator password for {email}.")
+                )
+                return
             self.stdout.write(f"Administrator account already exists for {email}; unchanged.")
             return
 
