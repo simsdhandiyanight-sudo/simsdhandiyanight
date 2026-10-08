@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Camera, Flashlight, KeyRound, RefreshCw } from 'lucide-react';
+import type QrScanner from 'qr-scanner';
 
 interface ScannerFrameProps {
   onScan: (code: string) => void;
@@ -7,11 +8,6 @@ interface ScannerFrameProps {
   className?: string;
 }
 
-type DetectedBarcode = { rawValue: string };
-type BarcodeDetectorInstance = {
-  detect: (source: HTMLVideoElement) => Promise<DetectedBarcode[]>;
-};
-type BarcodeDetectorConstructor = new (options: { formats: string[] }) => BarcodeDetectorInstance;
 type TorchCapabilities = MediaTrackCapabilities & { torch?: boolean };
 
 
@@ -22,6 +18,7 @@ export const ScannerFrame: React.FC<ScannerFrameProps> = ({
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const scannerRef = useRef<QrScanner | null>(null);
   const scanCallbackRef = useRef(onScan);
   const [manualInput, setManualInput] = useState('');
   const [cameraFacing, setCameraFacing] = useState<'environment' | 'user'>('environment');
@@ -38,83 +35,58 @@ export const ScannerFrame: React.FC<ScannerFrameProps> = ({
     if (!isScanning) return;
 
     let disposed = false;
-    let detectionTimer: number | undefined;
+    let scanHandled = false;
     const video = videoRef.current;
-    const detectorConstructor = (window as Window & {
-      BarcodeDetector?: BarcodeDetectorConstructor;
-    }).BarcodeDetector;
 
     setCameraReady(false);
     setTorchSupported(false);
     setTorchOn(false);
 
-    if (!detectorConstructor) {
-      setCameraMessage('Camera QR scanning is not supported in this browser. Use manual entry.');
-      return;
-    }
-    if (!navigator.mediaDevices?.getUserMedia || !video) {
+    if (!video || !navigator.mediaDevices?.getUserMedia) {
       setCameraMessage('Camera access is unavailable. Use HTTPS or localhost, or enter a ticket token manually.');
       return;
     }
 
-    const stopStream = () => {
-      streamRef.current?.getTracks().forEach((track) => track.stop());
-      streamRef.current = null;
-      if (video) video.srcObject = null;
-    };
-
     const startCamera = async () => {
+      let scanner: QrScanner | null = null;
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: false,
-          video: {
-            facingMode: { ideal: cameraFacing },
-            width: { ideal: 1280 },
-            height: { ideal: 960 },
+        const { default: QrScannerModule } = await import('qr-scanner');
+        if (disposed) return;
+        scanner = new QrScannerModule(
+          video,
+          (result) => {
+            const code = result.data.trim();
+            if (disposed || scanHandled || !code) return;
+            scanHandled = true;
+            scanCallbackRef.current(code);
           },
-        });
-        if (disposed) {
-          stream.getTracks().forEach((track) => track.stop());
-          return;
-        }
-
-        streamRef.current = stream;
-        video.srcObject = stream;
-        await video.play();
+          {
+            preferredCamera: cameraFacing,
+            maxScansPerSecond: 5,
+            highlightScanRegion: false,
+            highlightCodeOutline: false,
+            returnDetailedScanResult: true,
+          }
+        );
+        scannerRef.current = scanner;
+        await scanner.start();
         if (disposed) return;
 
-        const track = stream.getVideoTracks()[0];
+        const stream = video.srcObject;
+        streamRef.current = stream instanceof MediaStream ? stream : null;
+        const track = streamRef.current?.getVideoTracks()[0];
         setTorchSupported(Boolean((track?.getCapabilities() as TorchCapabilities | undefined)?.torch));
         setCameraReady(true);
         setCameraMessage('Camera ready. Center the ticket QR code in the frame.');
-
-        const detector = new detectorConstructor({ formats: ['qr_code'] });
-        const detectFrame = async () => {
-          if (disposed) return;
-          try {
-            const codes = await detector.detect(video);
-            const code = codes.find((item) => item.rawValue.trim())?.rawValue;
-            if (code) {
-              scanCallbackRef.current(code);
-              return;
-            }
-          } catch {
-            if (!disposed) {
-              setCameraReady(false);
-              setCameraMessage('QR detection stopped. Manual entry is still available.');
-            }
-            return;
-          }
-          if (!disposed) detectionTimer = window.setTimeout(() => void detectFrame(), 180);
-        };
-        void detectFrame();
       } catch (error) {
         if (disposed) return;
         const name = error instanceof DOMException ? error.name : '';
         setCameraMessage(
           name === 'NotFoundError'
             ? 'No camera was found on this device. Manual entry is still available.'
-            : 'Camera permission was denied or unavailable. Check browser permissions or use manual entry.'
+            : name === 'NotAllowedError' || name === 'PermissionDeniedError'
+              ? 'Camera permission was denied. Allow camera access in your browser settings, then reload.'
+              : 'Camera could not be started. Check browser permissions and use HTTPS, or enter a ticket token manually.'
         );
       }
     };
@@ -122,8 +94,11 @@ export const ScannerFrame: React.FC<ScannerFrameProps> = ({
     void startCamera();
     return () => {
       disposed = true;
-      if (detectionTimer !== undefined) window.clearTimeout(detectionTimer);
-      stopStream();
+      scannerRef.current?.stop();
+      scannerRef.current?.destroy();
+      scannerRef.current = null;
+      streamRef.current = null;
+      video.srcObject = null;
     };
   }, [cameraFacing, isScanning]);
 
