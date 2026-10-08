@@ -47,7 +47,12 @@ const ProtectedRoute: React.FC<{
     return <Navigate to="/staff/login" replace state={{ from: location }} />;
   }
   if (!allowedRoles.includes(user.role)) {
-    return <Navigate to={user.role === 'ADMIN' ? '/admin' : '/staff/dashboard'} replace />;
+    const roleHome = user.role === 'ADMIN'
+      ? '/admin'
+      : user.role === 'REGISTRATION'
+        ? '/staff/register'
+        : '/staff/scanner';
+    return <Navigate to={roleHome} replace />;
   }
   return <>{children}</>;
 };
@@ -71,7 +76,7 @@ export default function App() {
 
           {/* Staff Routes */}
           <Route path="/staff/login" element={<StaffLoginPage />} />
-          <Route path="/staff/dashboard" element={<ProtectedRoute allowedRoles={['ADMIN', 'REGISTRATION', 'SCANNER']}><StaffDashboardPage /></ProtectedRoute>} />
+          <Route path="/staff/dashboard" element={<ProtectedRoute allowedRoles={['ADMIN']}><StaffDashboardPage /></ProtectedRoute>} />
           <Route path="/staff/register" element={<ProtectedRoute allowedRoles={['ADMIN', 'REGISTRATION']}><OnSpotRegistrationPage /></ProtectedRoute>} />
           <Route path="/staff/scanner" element={<ProtectedRoute allowedRoles={['ADMIN', 'SCANNER']}><StaffScannerPage /></ProtectedRoute>} />
           <Route path="/staff/scanner/result" element={<ProtectedRoute allowedRoles={['ADMIN', 'SCANNER']}><StaffScannerPage /></ProtectedRoute>} />

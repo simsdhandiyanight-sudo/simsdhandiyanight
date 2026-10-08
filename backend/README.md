@@ -18,6 +18,21 @@ The seed command creates the canonical event and its two ticket offers only.
 It does not create attendee data, tickets, scans, staff users, or credentials.
 Do not use the SQLite development fallback in production.
 
+## Staff accounts and panel access
+
+Create staff accounts individually in Django admin at `/admin/` using an
+administrator account. Create four users with the `Scanner staff` role and
+four with the `Registration staff` role. Give each person a unique email and
+password; leave `is_staff` and `is_superuser` disabled for these accounts so
+they cannot sign in to Django admin. Scanner accounts may be assigned to a gate
+through the Staff assignments section.
+
+Scanner staff sign in at `/staff/login` and are routed to the scanner panel.
+Registration staff use the same sign-in page and are routed to the on-spot
+registration panel. Each role is restricted to its own panel and API operations;
+neither staff role can access the admin panel. These accounts are not generated
+by the event seed command.
+
 For local frontend development, copy `client/.env.example` to
 `client/.env.local` and set `VITE_API_URL` to the local Django API origin. The
 Vite development server proxies `/api` requests to that configured origin; it

@@ -4,6 +4,7 @@ import { eventsApi, FEATURED_EVENT_SLUG } from '../../api/events';
 import { registrationsApi } from '../../api/registrations';
 import { EventItem, Ticket } from '../../types';
 import { DigitalTicket } from '../../components/ticket/DigitalTicket';
+import { useAuth } from '../../context/AuthContext';
 import {
   CheckCircle2,
   Printer,
@@ -14,6 +15,7 @@ import {
 } from 'lucide-react';
 
 export const OnSpotRegistrationPage: React.FC = () => {
+  const { user } = useAuth();
   const [activeEvent, setActiveEvent] = useState<EventItem | null>(null);
   const [loadingEvent, setLoadingEvent] = useState(true);
   const [eventLoadError, setEventLoadError] = useState('');
@@ -111,28 +113,21 @@ export const OnSpotRegistrationPage: React.FC = () => {
       {/* Header */}
       <header className="bg-slate-900 border-b border-slate-800 px-4 sm:px-8 py-3.5 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <Link
-            to="/staff/dashboard"
-            className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors"
-          >
-            <ArrowLeft className="w-4 h-4" />
-          </Link>
+          {user?.role === 'ADMIN' && (
+            <Link
+              to="/admin"
+              className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors"
+              aria-label="Back to admin panel"
+            >
+              <ArrowLeft className="w-4 h-4" />
+            </Link>
+          )}
           <span className="font-display font-bold text-white text-base">
             Soundarya · On-Spot Desk
           </span>
           <span className="text-xs font-mono text-emerald-400 bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-800/80">
             FAST ENTRY KIOSK
           </span>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <Link
-            to="/staff/scanner"
-            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 rounded-lg flex items-center gap-1.5"
-          >
-            <QrCode className="w-3.5 h-3.5 text-indigo-400" />
-            <span>Open Scanner</span>
-          </Link>
         </div>
       </header>
 

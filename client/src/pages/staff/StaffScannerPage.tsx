@@ -111,13 +111,16 @@ export const StaffScannerPage: React.FC = () => {
       {/* Mobile-first Header: Reachable, compact */}
       <header className="bg-slate-900 border-b border-slate-800 px-4 py-3 flex items-center justify-between sticky top-0 z-30">
         <div className="flex items-center gap-2.5">
-          <Link
-            to="/staff/dashboard"
-            className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors"
-            title="Back to Staff Dashboard"
-          >
-            <ArrowLeft className="w-5 h-5" />
-          </Link>
+          {user?.role === 'ADMIN' && (
+            <Link
+              to="/admin"
+              className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors"
+              title="Back to Admin Panel"
+              aria-label="Back to admin panel"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </Link>
+          )}
           <div>
             <div className="flex items-center gap-2">
               <span className="font-bold text-white text-xs sm:text-sm font-display truncate max-w-[180px] sm:max-w-xs">
@@ -206,9 +209,6 @@ export const StaffScannerPage: React.FC = () => {
       {/* Operational Bottom Controls */}
       <footer className="p-3 bg-slate-900 border-t border-slate-800 text-center text-[11px] text-slate-500 flex items-center justify-between max-w-lg mx-auto w-full">
         <span>Soundarya Dhandiya Night · Gate Operations · Backend connected</span>
-        <Link to="/staff/register" className="text-indigo-400 hover:underline">
-          Switch to On-Spot Desk &rarr;
-        </Link>
       </footer>
 
       {/* Modal Result Pop-up with Immediate Visual Clarity */}
