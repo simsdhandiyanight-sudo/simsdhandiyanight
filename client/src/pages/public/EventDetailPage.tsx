@@ -268,6 +268,11 @@ export const EventDetailPage: React.FC = () => {
                         <p className="text-xs text-slate-400 leading-relaxed">
                           {tier.description}
                         </p>
+                        {tier.perks.map((perk) => (
+                          <p key={perk} className="text-[11px] text-amber-700 leading-relaxed">
+                            {perk}
+                          </p>
+                        ))}
                         <div className="pt-2 border-t border-slate-900 flex justify-between items-center text-[11px] text-slate-500 font-mono">
                           <span>
                             {tier.available > 0

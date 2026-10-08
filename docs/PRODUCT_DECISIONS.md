@@ -24,13 +24,13 @@ This document records decisions needed to move the current Dhandiya Night demo t
 
 - The current configured offers are one Single Ticket for ₹149 before applicable taxes, and one Combo Offer for ₹745 before applicable taxes.
 - The combo covers six admissions: five paid admissions and one included free admission. One buyer/contact may purchase/register the combo; the backend creates six independently scannable tickets under that registration.
-- The combo consumes four units of event admission capacity. The offer itself is one purchasable package; package availability and admission capacity are distinct quantities.
-- The buyer's registration is not a substitute for the four ticket credentials. Entry is validated per ticket.
+- The combo consumes six units of event admission capacity. The offer itself is one purchasable package; package availability and admission capacity are distinct quantities.
+- The buyer's registration is not a substitute for the six ticket credentials. Entry is validated per ticket.
 - Combo registration is blocked unless all six attendee names are supplied; buyer email and phone remain single shared contact fields.
 
 **UNRESOLVED**
 
-- Whether taxes apply to the three paid admissions, the full combo amount, or another taxable base. No tax rate or tax calculation is defined.
+- Whether taxes apply to the five paid admissions, the full combo amount, or another taxable base. No tax rate or tax calculation is defined.
 - How partial cancellation of a combo should affect its included tickets or package availability.
 
 ## 3. Duplicate registration policy

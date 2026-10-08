@@ -46,6 +46,15 @@ class CanonicalEventSeedTests(TestCase):
         self.assertEqual(combo.name, "Combo Offer — Buy 5, Get 1 Free")
         self.assertEqual(str(combo.price), "745.00")
         self.assertEqual(combo.admission_count, 6)
+        self.assertIn(
+            "1 welcome drink and 1 set of Dhandiya sticks per ticket",
+            combo.perks,
+        )
+        single = event.tiers.get(slug="single-ticket")
+        self.assertIn(
+            "1 welcome drink and 1 set of Dhandiya sticks per ticket",
+            single.perks,
+        )
         response = APIClient().get("/api/v1/events/dhandiya-night-2026/")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(

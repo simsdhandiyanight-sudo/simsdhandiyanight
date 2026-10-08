@@ -64,8 +64,8 @@ class Command(BaseCommand):
                 "name": "Single Ticket",
                 "price": "149.00",
                 "admission_count": 1,
-                "description": "One admission. Taxes, if applicable, are not configured.",
-                "perks": ["One Dandiya Night admission"],
+                "description": "One admission. Applicable taxes extra.",
+                "perks": ["1 welcome drink and 1 set of Dhandiya sticks per ticket"],
             },
             {
                 "slug": "combo-buy-5-get-1",
@@ -73,8 +73,11 @@ class Command(BaseCommand):
                 "name": "Combo Offer — Buy 5, Get 1 Free",
                 "price": "745.00",
                 "admission_count": 6,
-                "description": "Six admissions for the configured combo price.",
-                "perks": ["Six independently scannable admissions"],
+                "description": "Six admissions for the combo price.",
+                "perks": [
+                    "Six independently scannable admissions",
+                    "1 welcome drink and 1 set of Dhandiya sticks per ticket",
+                ],
             },
         )
         for tier in tiers:
