@@ -1,0 +1,58 @@
+import { EventItem } from '../types';
+
+export const FEATURED_EVENT: EventItem = {
+  id: '8b3f7a20-6e8d-4b91-a462-9c5d2f1e7043',
+  slug: 'dhandiya-night-2026',
+  name: 'Dhandiya Night 2026',
+  tagline: 'Dance · Dandiya · Dhamaka',
+  description: [
+    'Celebrate the vibrant spirit of Navratri through Dandiya, a joyful celebration of music, dance, and togetherness.',
+    'Get ready for an evening filled with rhythm, colours, energy, and festive vibes.',
+    'Dance to lively beats and celebrate the season with friends, family, and loved ones.',
+    'Put on your festive best and make memories that last beyond the night.',
+    'Join us on 16th October and let the celebration begin.',
+  ].join('\n'),
+  category: 'music',
+  date: '2026-10-16',
+  formattedDate: '16th October 2026',
+  time: '6:00 PM – 9:00 PM',
+  venue: 'Soundarya College Campus',
+  city: 'Bengaluru',
+  address: 'Sidedahalli, Soundarya Layout, Bengaluru - 560073',
+  status: 'upcoming',
+  capacity: 2500,
+  registeredCount: 0,
+  checkedInCount: 0,
+  tiers: [
+    {
+      id: 'single-ticket',
+      name: 'Single Ticket',
+      price: 149,
+      admissionCount: 1,
+      description: 'One admission. Taxes, if applicable, are not configured.',
+      perks: ['One Dandiya Night admission'],
+      available: 0,
+    },
+    {
+      id: 'combo-buy-3-get-1',
+      name: 'Combo Offer — Buy 3, Get 1 Free',
+      price: 447,
+      admissionCount: 4,
+      description: 'Four admissions for the configured combo price.',
+      perks: ['Four independently scannable admissions'],
+      available: 0,
+    },
+  ],
+  highlights: [
+    'An evening of Garba, Dandiya, and festive music',
+    'Traditional dance with friends and the Soundarya community',
+    'Festive decorations and folk-inspired details',
+  ],
+  schedule: [
+    { time: '6:00 PM', title: 'Doors Open & Welcome', speaker: 'Soundarya Institute' },
+    { time: '6:30 PM', title: 'Garba & Dandiya Celebration', speaker: 'Daksha Student Council' },
+    { time: '8:45 PM', title: 'Final Dance & Festive Farewell', speaker: 'Daksha Student Council' },
+  ],
+  faqs: [],
+  accentColor: '#b71959',
+};

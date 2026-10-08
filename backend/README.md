@@ -10,13 +10,17 @@
    `DATABASE_NAME` is unset, Django uses a local SQLite database for development
    and tests only.
 5. Run `python manage.py migrate`.
-6. Run `python manage.py seed_dhandiya_event`.
+6. Run `python manage.py seed_dhandiya_event` to enable backend event APIs,
+   ticket registration, payments, and staff operations.
 7. Create an administrator with `python manage.py createsuperuser`.
 8. Start with `python manage.py runserver`.
 
 The seed command creates the canonical event and its two ticket offers only.
 It does not create attendee data, tickets, scans, staff users, or credentials.
 Do not use the SQLite development fallback in production.
+The public landing and event detail pages display hardcoded event information
+without requiring this seed, but online registration and staff operations
+remain unavailable until the backend event and ticket offers are created.
 
 ## Staff accounts and panel access
 
@@ -43,11 +47,12 @@ does not embed a localhost fallback in the application bundle.
 The repository-root `render.yaml` defines a Django web service and a separate
 Render Background Worker. In Render, create the services from that Blueprint.
 The web service installs the backend requirements, collects static files,
-runs migrations and seeds the canonical Dhandiya Night event at startup, then
-starts Gunicorn. This keeps the event and its ticket offers available without
-manually opening a Render Shell; the seed command is safe to rerun. The worker
-runs `python manage.py process_ticket_emails --loop` against the same database.
-Do not run the email command as a Vercel Cron job.
+runs database schema migrations at startup, then starts Gunicorn. It does not
+seed event records. The public landing and event detail pages use hardcoded
+display data; online registration and staff operations require the canonical
+event and ticket tiers to be created in the backend database. The worker runs
+`python manage.py process_ticket_emails --loop` against the same database. Do
+not run the email command as a Vercel Cron job.
 
 Create a Neon PostgreSQL database and set `DATABASE_URL` on the Render web
 service to its TLS-enabled direct connection string. Keep the connection

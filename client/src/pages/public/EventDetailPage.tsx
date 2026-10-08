@@ -1,17 +1,14 @@
-import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
-import { eventsApi, FEATURED_EVENT_SLUG } from '../../api/events';
-import { EventItem } from '../../types';
+import React, { useState } from 'react';
 import { Navbar } from '../../components/common/Navbar';
 import { Footer } from '../../components/common/Footer';
 import { FestivalMotifs } from '../../components/common/FestivalMotifs';
 import { FestivalPoster } from '../../components/common/FestivalPoster';
+import { FEATURED_EVENT } from '../../mock/featuredEvent';
 import {
   Calendar,
   Clock,
   MapPin,
   CheckCircle2,
-  ArrowRight,
   ChevronDown,
   ChevronUp,
 
@@ -19,53 +16,8 @@ import {
 } from 'lucide-react';
 
 export const EventDetailPage: React.FC = () => {
-  const [event, setEvent] = useState<EventItem | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState('');
   const [openFaq, setOpenFaq] = useState<number | null>(0);
-
-  useEffect(() => {
-    let cancelled = false;
-    eventsApi.getById(FEATURED_EVENT_SLUG).then((data) => {
-      if (cancelled) return;
-      setEvent(data);
-      setLoading(false);
-    }).catch((error: unknown) => {
-      if (cancelled) return;
-      setLoadError(error instanceof Error ? error.message : 'Unable to load event details. Please try again.');
-      setLoading(false);
-    });
-    return () => { cancelled = true; };
-  }, []);
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center">
-        <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
-  }
-
-  if (!event) {
-    return (
-      <div className="festival-public min-h-screen bg-slate-950 text-slate-100 flex flex-col">
-        <Navbar />
-        <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
-          <h2 className="text-2xl font-bold font-display text-white mb-2">Event Not Found</h2>
-          <p className="text-slate-400 text-sm mb-6">{loadError || 'Dhandiya Night event details are currently unavailable.'}</p>
-          <Link
-            to="/"
-            className="px-5 py-2.5 bg-indigo-600 text-white rounded-xl text-xs font-semibold"
-          >
-            Back to Dhandiya Night
-          </Link>
-        </div>
-        <Footer />
-      </div>
-    );
-  }
-
-  const isOpen = event.status === 'open';
+  const event = FEATURED_EVENT;
 
   return (
     <div className="festival-public min-h-screen flex flex-col bg-slate-950 text-slate-100">
@@ -84,9 +36,7 @@ export const EventDetailPage: React.FC = () => {
                     Soundarya Institute
                   </span>
                   <span className="text-slate-600">·</span>
-                  <span className="font-mono text-emerald-400">
-                    {isOpen ? '● REGISTRATION OPEN' : event.status.toUpperCase()}
-                  </span>
+                  <span className="font-mono text-indigo-300">EVENT INFORMATION</span>
                 </div>
 
                 <h1 className="text-3xl sm:text-5xl lg:text-6xl font-display font-extrabold text-white tracking-tight leading-[1.1] text-balance">
@@ -126,23 +76,9 @@ export const EventDetailPage: React.FC = () => {
 
                 {/* Main CTA */}
                 <div className="flex flex-wrap items-center gap-4 pt-2">
-                  {isOpen ? (
-                    <Link
-                      to={`/register/${event.slug}`}
-                      className="px-8 py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold text-sm tracking-wide shadow-lg shadow-indigo-600/30 transition-all hover:translate-y-[-1px] inline-flex items-center gap-2 cursor-pointer uppercase"
-                    >
-                      <span>Reserve your pass</span>
-                      <ArrowRight className="w-4 h-4" />
-                    </Link>
-                  ) : (
-                    <button
-                      disabled
-                      className="px-8 py-4 bg-slate-800 text-slate-500 rounded-xl font-bold text-sm tracking-wide uppercase cursor-not-allowed"
-                    >
-                      REGISTRATION CLOSED
-                    </button>
-                  )}
-
+                  <p className="text-sm text-slate-400">
+                    Online registration will be available once ticketing is configured.
+                  </p>
                 </div>
               </div>
 
@@ -292,32 +228,16 @@ export const EventDetailPage: React.FC = () => {
                         </p>
                         <div className="pt-2 border-t border-slate-900 flex justify-between items-center text-[11px] text-slate-500 font-mono">
                           <span>
-                            {tier.admissionCount === 4
-                              ? `${tier.available} combo offers left`
-                              : `${tier.available} tickets left`}
+                            {tier.admissionCount === 4 ? 'Four admissions' : 'Single admission'}
                           </span>
-                          {isOpen && (
-                            <Link
-                              to={`/register/${event.slug}?tier=${tier.id}`}
-                              className="text-indigo-400 hover:text-indigo-300 font-semibold"
-                            >
-                              Select Tier &rarr;
-                            </Link>
-                          )}
                         </div>
                       </div>
                     ))}
                   </div>
 
-                  {isOpen && (
-                    <Link
-                      to={`/register/${event.slug}`}
-                      className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-md shadow-indigo-600/30 transition-all cursor-pointer"
-                    >
-                      <span>REGISTER NOW</span>
-                      <ArrowRight className="w-4 h-4" />
-                    </Link>
-                  )}
+                  <p className="text-xs text-center text-slate-400">
+                    Ticket sales will be enabled after backend event setup.
+                  </p>
                 </div>
 
                 <div className="p-4 bg-slate-900/60 border border-slate-800/80 rounded-2xl text-xs text-slate-400 space-y-2">
