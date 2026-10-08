@@ -428,10 +428,6 @@ export const RegistrationPage: React.FC = () => {
             <span className="text-sm font-bold text-white font-mono">{selectedTier?.name}</span>
           </div>
         </div>
-        <p className="mb-6 rounded-xl border border-amber-900/60 bg-amber-950/30 px-4 py-3 text-xs leading-relaxed text-amber-200">
-          Payments are processed in Razorpay Test Mode. Applicable taxes have not been configured; your ticket is issued only after payment verification.
-        </p>
-
         {!registrationAvailable ? (
           <div className="rounded-2xl border border-amber-900/60 bg-amber-950/30 p-6 text-center">
             <h2 className="font-display text-lg font-bold text-white">Registration is unavailable</h2>
