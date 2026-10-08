@@ -968,7 +968,7 @@ A scanner operation must be able to handle legitimate rapid scanning while still
 ---
 
 # 37. Registration Idempotency
-Online payment-order and on-spot registration requests require an `Idempotency-Key` header containing a UUID.
+Online payment-order and on-spot registration requests require an `Idempotency-Key` header containing a UUID. Browser clients making cross-origin requests must be allowed to send this header by the API's CORS policy.
 
 ```http
 Idempotency-Key: 85635d34-bcbf-4a6d-b15e-0019e16bba80

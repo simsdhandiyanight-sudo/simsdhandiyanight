@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
+from corsheaders.defaults import default_headers
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parents[2]
@@ -150,6 +151,7 @@ CORS_ALLOWED_ORIGINS = [
     for origin in os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",")
     if origin.strip()
 ]
+CORS_ALLOW_HEADERS = (*default_headers, "idempotency-key")
 CORS_ALLOW_CREDENTIALS = True
 
 RAZORPAY_KEY_ID = os.environ.get("RAZORPAY_KEY_ID", "")

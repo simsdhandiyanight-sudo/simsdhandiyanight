@@ -1137,6 +1137,12 @@ class TicketingApiTests(TestCase):
             "/api/v1/auth/csrf/",
             HTTP_ORIGIN="https://ticketing-test.vercel.app",
         )
+        preflight = self.client.options(
+            "/api/v1/payments/create-order/",
+            HTTP_ORIGIN="https://ticketing-test.vercel.app",
+            HTTP_ACCESS_CONTROL_REQUEST_METHOD="POST",
+            HTTP_ACCESS_CONTROL_REQUEST_HEADERS="content-type,idempotency-key,x-csrftoken",
+        )
         denied = self.client.get(
             "/api/v1/auth/csrf/",
             HTTP_ORIGIN="https://untrusted.example",
@@ -1148,6 +1154,10 @@ class TicketingApiTests(TestCase):
         self.assertEqual(
             allowed.headers["Access-Control-Allow-Credentials"],
             "true",
+        )
+        self.assertIn(
+            "idempotency-key",
+            preflight.headers["Access-Control-Allow-Headers"],
         )
         self.assertNotIn("Access-Control-Allow-Origin", denied.headers)
 
