@@ -43,8 +43,10 @@ does not embed a localhost fallback in the application bundle.
 The repository-root `render.yaml` defines a Django web service and a separate
 Render Background Worker. In Render, create the services from that Blueprint.
 The web service installs the backend requirements, collects static files,
-runs migrations before deploy, and starts Gunicorn. The worker runs
-`python manage.py process_ticket_emails --loop` against the same database.
+runs migrations and seeds the canonical Dhandiya Night event at startup, then
+starts Gunicorn. This keeps the event and its ticket offers available without
+manually opening a Render Shell; the seed command is safe to rerun. The worker
+runs `python manage.py process_ticket_emails --loop` against the same database.
 Do not run the email command as a Vercel Cron job.
 
 Create a Neon PostgreSQL database and set `DATABASE_URL` on the Render web

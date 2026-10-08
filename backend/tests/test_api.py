@@ -6,6 +6,7 @@ from datetime import timedelta
 from unittest.mock import Mock, patch
 
 from django.contrib.auth import get_user_model
+from django.core.management import call_command
 from django.test import TestCase, override_settings
 from django.utils import timezone
 import requests
@@ -27,6 +28,19 @@ class FakeBrevoResponse:
     def __init__(self, message_id, status_code=201):
         self.status_code = status_code
         self.json = Mock(return_value={"messageId": message_id})
+
+
+class CanonicalEventSeedTests(TestCase):
+    def test_seed_command_is_safe_to_run_repeatedly(self):
+        call_command("seed_dhandiya_event")
+        call_command("seed_dhandiya_event")
+
+        event = Event.objects.get(slug="dhandiya-night-2026")
+        self.assertEqual(Event.objects.filter(slug="dhandiya-night-2026").count(), 1)
+        self.assertEqual(
+            set(event.tiers.values_list("slug", flat=True)),
+            {"single-ticket", "combo-buy-3-get-1"},
+        )
 
 
 @override_settings(
