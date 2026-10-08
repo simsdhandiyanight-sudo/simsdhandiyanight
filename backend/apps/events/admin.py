@@ -14,6 +14,8 @@ class EventAdmin(admin.ModelAdmin):
     list_filter = ("status", "registration_open")
     search_fields = ("name", "slug")
     inlines = (TicketTierInline,)
+    list_per_page = 25
+    show_full_result_count = False
     fields = (
         "slug",
         "name",
@@ -37,3 +39,13 @@ class EventAdmin(admin.ModelAdmin):
         "faqs",
         "accent_color",
     )
+
+
+@admin.register(TicketTier)
+class TicketTierAdmin(admin.ModelAdmin):
+    list_display = ("name", "event", "price", "currency", "admission_count", "is_available")
+    list_select_related = ("event",)
+    list_filter = ("event", "is_available")
+    search_fields = ("name", "slug")
+    list_per_page = 25
+    show_full_result_count = False

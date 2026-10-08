@@ -686,31 +686,49 @@ def get_payment_review_dashboard():
         | Q(captured_for_intent__gt=1)
     )
     payment_review_queryset = captured_payment_queryset.filter(needs_review)
-    captured_payments = payment_review_queryset.order_by("-updated_at")[:200]
+    captured_payments_raw = list(payment_review_queryset.order_by("-updated_at")[:201])
+    has_more_payments = len(captured_payments_raw) > 200
+    captured_payments = captured_payments_raw[:200]
     payment_cases = []
+    issue_counts_agg = captured_payment_queryset.aggregate(
+        PAYMENT_REVIEW_REQUIRED=Count(
+            "id",
+            filter=(
+                Q(ticket_issuance_status__in=(
+                    Payment.TicketIssuanceStatus.PENDING,
+                    Payment.TicketIssuanceStatus.ADMIN_REVIEW_REQUIRED,
+                ))
+                | ~Q(verification_status=Payment.VerificationStatus.VERIFIED)
+                | Q(intent__registration__isnull=True)
+                | ~Q(ticket_count=F("intent__ticket_tier__admission_count"))
+            ),
+        ),
+        TICKET_ISSUANCE_FAILED=Count(
+            "id",
+            filter=Q(ticket_issuance_status=Payment.TicketIssuanceStatus.ADMIN_REVIEW_REQUIRED),
+        ),
+        PAYMENT_CAPTURED_WITHOUT_TICKET=Count(
+            "id",
+            filter=Q(intent__registration__isnull=True) | Q(ticket_count=0),
+        ),
+        PAYMENT_CAPTURED_WITH_INCOMPLETE_REGISTRATION=Count(
+            "id",
+            filter=(
+                Q(intent__registration__isnull=True)
+                | ~Q(ticket_count=F("intent__ticket_tier__admission_count"))
+            ),
+        ),
+        DUPLICATE_PAYMENT=Count(
+            "id",
+            filter=Q(captured_for_intent__gt=1),
+        ),
+    )
     issue_counts = {
-        "PAYMENT_REVIEW_REQUIRED": captured_payment_queryset.filter(
-            Q(ticket_issuance_status__in=(
-                Payment.TicketIssuanceStatus.PENDING,
-                Payment.TicketIssuanceStatus.ADMIN_REVIEW_REQUIRED,
-            ))
-            | ~Q(verification_status=Payment.VerificationStatus.VERIFIED)
-            | Q(intent__registration__isnull=True)
-            | ~Q(ticket_count=F("intent__ticket_tier__admission_count"))
-        ).count(),
-        "TICKET_ISSUANCE_FAILED": captured_payment_queryset.filter(
-            ticket_issuance_status=Payment.TicketIssuanceStatus.ADMIN_REVIEW_REQUIRED
-        ).count(),
-        "PAYMENT_CAPTURED_WITHOUT_TICKET": captured_payment_queryset.filter(
-            Q(intent__registration__isnull=True) | Q(ticket_count=0)
-        ).count(),
-        "PAYMENT_CAPTURED_WITH_INCOMPLETE_REGISTRATION": captured_payment_queryset.filter(
-            Q(intent__registration__isnull=True)
-            | ~Q(ticket_count=F("intent__ticket_tier__admission_count"))
-        ).count(),
-        "DUPLICATE_PAYMENT": captured_payment_queryset.filter(
-            captured_for_intent__gt=1
-        ).count(),
+        "PAYMENT_REVIEW_REQUIRED": issue_counts_agg["PAYMENT_REVIEW_REQUIRED"] or 0,
+        "TICKET_ISSUANCE_FAILED": issue_counts_agg["TICKET_ISSUANCE_FAILED"] or 0,
+        "PAYMENT_CAPTURED_WITHOUT_TICKET": issue_counts_agg["PAYMENT_CAPTURED_WITHOUT_TICKET"] or 0,
+        "PAYMENT_CAPTURED_WITH_INCOMPLETE_REGISTRATION": issue_counts_agg["PAYMENT_CAPTURED_WITH_INCOMPLETE_REGISTRATION"] or 0,
+        "DUPLICATE_PAYMENT": issue_counts_agg["DUPLICATE_PAYMENT"] or 0,
     }
     for payment in captured_payments:
         intent = payment.intent
@@ -775,6 +793,8 @@ def get_payment_review_dashboard():
         .select_related("event", "ticket_tier")
         .order_by("-created_at")
     )
+    registration_rows = list(registrations_without_valid_payment_queryset[:201])
+    has_more_registrations = len(registration_rows) > 200
     registration_cases = [
         {
             "registration_id": str(registration.id),
@@ -789,16 +809,18 @@ def get_payment_review_dashboard():
             "created_at": registration.created_at.isoformat(),
             "issue_code": "TICKET_WITHOUT_VALID_PAYMENT",
         }
-        for registration in registrations_without_valid_payment_queryset[:200]
+        for registration in registration_rows[:200]
     ]
-    issue_counts["TICKET_WITHOUT_VALID_PAYMENT"] = (
-        registrations_without_valid_payment_queryset.count()
-    )
+    if has_more_registrations:
+        issue_counts["TICKET_WITHOUT_VALID_PAYMENT"] = (
+            registrations_without_valid_payment_queryset.count()
+        )
+    else:
+        issue_counts["TICKET_WITHOUT_VALID_PAYMENT"] = len(registration_rows)
     return {
         "issue_counts": issue_counts,
         "payments": payment_cases,
         "registrations_without_valid_payment": registration_cases,
-        "has_more_payments": payment_review_queryset.count() > len(payment_cases),
-        "has_more_registrations": issue_counts["TICKET_WITHOUT_VALID_PAYMENT"]
-        > len(registration_cases),
+        "has_more_payments": has_more_payments,
+        "has_more_registrations": has_more_registrations,
     }

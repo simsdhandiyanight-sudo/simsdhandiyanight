@@ -60,8 +60,8 @@ const ProtectedRoute: React.FC<{
 
 export default function App() {
   return (
-    <AuthProvider>
-      <BrowserRouter>
+    <BrowserRouter>
+      <AuthProvider>
         <Suspense fallback={<PageLoading />}>
           <Routes>
             {/* Public Routes */}
@@ -98,7 +98,7 @@ export default function App() {
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>
-      </BrowserRouter>
-    </AuthProvider>
+      </AuthProvider>
+    </BrowserRouter>
   );
 }

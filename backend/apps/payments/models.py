@@ -91,6 +91,7 @@ class Payment(models.Model):
         indexes = [
             models.Index(fields=("intent", "status", "created_at")),
             models.Index(fields=("verification_status", "created_at")),
+            models.Index(fields=("status", "created_at"), name="payment_status_created_idx"),
         ]
         constraints = [
             models.UniqueConstraint(

@@ -532,6 +532,7 @@ def get_delivery_dashboard():
                 TicketDelivery.Status.RECONCILIATION_REQUIRED,
             )
         )
+        .defer("pdf_content")
         .select_related("ticket__registration__event")
         .order_by("created_at")[:100]
     )

@@ -9,6 +9,8 @@ class UserAdmin(BaseUserAdmin):
     ordering = ("email",)
     list_display = ("email", "name", "role", "is_active", "is_staff")
     list_filter = ("role", "is_active", "is_staff")
+    list_per_page = 25
+    show_full_result_count = False
     fieldsets = (
         (None, {"fields": ("email", "password")}),
         ("Profile", {"fields": ("name", "role")}),

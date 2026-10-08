@@ -2874,9 +2874,107 @@ textarea {
   object-fit: contain;
 }
 
+.festival-organizers {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  padding: 2.5rem 1rem;
+  border-bottom: 1px solid rgba(190, 145, 53, 0.3);
+  background: linear-gradient(180deg, #fffaf0, #fff6e6);
+  text-align: center;
+}
+
+.festival-organizers__title,
+.festival-organizers__support-title {
+  color: #9d4c0b;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.festival-organizers__title {
+  font-size: 0.78rem;
+}
+
+.festival-organizers__logos {
+  display: flex;
+  width: min(100%, 700px);
+  align-items: center;
+  justify-content: center;
+  gap: clamp(1rem, 5vw, 3rem);
+  margin: 0.25rem 0 0.75rem;
+}
+
+.festival-organizers__item {
+  display: flex;
+  width: min(42vw, 280px);
+  min-height: 176px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 1rem;
+  border: 1px solid rgba(190, 145, 53, 0.24);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 8px 24px rgba(84, 55, 20, 0.06);
+}
+
+.festival-organizers__logos img {
+  display: block;
+  width: min(100%, 210px);
+  height: 100px;
+  object-fit: contain;
+}
+
+.festival-organizers__item figcaption,
+.festival-organizers__support figcaption {
+  color: #18264b;
+  font-size: 0.78rem;
+  font-weight: 750;
+  letter-spacing: 0.015em;
+  line-height: 1.45;
+}
+
+.festival-organizers__support {
+  display: flex;
+  min-width: min(100%, 260px);
+  flex-direction: column;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.85rem 1.25rem;
+  border: 1px solid rgba(190, 145, 53, 0.24);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 8px 24px rgba(84, 55, 20, 0.06);
+}
+
+.festival-organizers__support-logo {
+  display: block;
+  width: min(100%, 220px);
+  height: 100px;
+  object-fit: contain;
+}
+
 @media (max-width: 640px) {
   .festival-public .festival-home-hero {
     padding: 6.5rem 0.9rem 1rem;
+  }
+
+  .festival-organizers__logos img {
+    height: 82px;
+  }
+
+  .festival-organizers__item {
+    min-height: 158px;
+    padding: 0.75rem;
+  }
+
+  .festival-organizers__item figcaption,
+  .festival-organizers__support figcaption {
+    font-size: 0.7rem;
   }
 
   .festival-home-poster {

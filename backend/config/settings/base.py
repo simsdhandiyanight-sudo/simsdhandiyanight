@@ -71,6 +71,7 @@ ASGI_APPLICATION = "config.asgi.application"
 
 database_url = os.environ.get("DATABASE_URL", "")
 database_name = os.environ.get("DATABASE_NAME", "")
+conn_max_age = int(os.environ.get("DATABASE_CONN_MAX_AGE", "600"))
 if database_url:
     parsed_database_url = urlparse(database_url)
     if parsed_database_url.scheme not in {"postgres", "postgresql"}:
@@ -84,7 +85,8 @@ if database_url:
             "PASSWORD": unquote(parsed_database_url.password or ""),
             "HOST": parsed_database_url.hostname or "",
             "PORT": str(parsed_database_url.port or 5432),
-            "CONN_MAX_AGE": 60,
+            "CONN_MAX_AGE": conn_max_age,
+            "CONN_HEALTH_CHECKS": True,
             "OPTIONS": {
                 "sslmode": parse_qs(parsed_database_url.query).get(
                     "sslmode",
@@ -102,7 +104,8 @@ elif database_name:
             "PASSWORD": os.environ.get("DATABASE_PASSWORD", ""),
             "HOST": os.environ.get("DATABASE_HOST", "localhost"),
             "PORT": os.environ.get("DATABASE_PORT", "5432"),
-            "CONN_MAX_AGE": 60,
+            "CONN_MAX_AGE": conn_max_age,
+            "CONN_HEALTH_CHECKS": True,
         }
     }
 else:

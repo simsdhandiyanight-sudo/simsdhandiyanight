@@ -148,28 +148,40 @@ class DashboardSummaryView(APIView):
         registrations = Registration.objects.filter(event=event)
         tickets = Ticket.objects.filter(registration__event=event)
         scans = TicketScan.objects.filter(event=event)
+
+        reg_stats = registrations.aggregate(
+            total=Count("id"),
+            online=Count("id", filter=Q(source=Registration.Source.ONLINE)),
+            on_spot=Count("id", filter=Q(source=Registration.Source.ON_SPOT)),
+        )
+        ticket_stats = tickets.aggregate(
+            active=Count("id", filter=~Q(status=Ticket.Status.CANCELLED)),
+            used=Count("id", filter=Q(status=Ticket.Status.USED)),
+            cancelled=Count("id", filter=Q(status=Ticket.Status.CANCELLED)),
+        )
+        scan_results = list(
+            scans.values("result")
+            .annotate(count=Count("id"))
+            .order_by("result")
+        )
+        scan_attempts = sum(item["count"] for item in scan_results)
+        entry_granted = next(
+            (item["count"] for item in scan_results if item["result"] == TicketScan.Result.ENTRY_GRANTED),
+            0,
+        )
+
         return Response(
             {
                 "event_id": str(event.id),
-                "registrations": registrations.count(),
-                "online_registrations": registrations.filter(
-                    source=Registration.Source.ONLINE
-                ).count(),
-                "on_spot_registrations": registrations.filter(
-                    source=Registration.Source.ON_SPOT
-                ).count(),
-                "active_tickets": tickets.exclude(status=Ticket.Status.CANCELLED).count(),
-                "used_tickets": tickets.filter(status=Ticket.Status.USED).count(),
-                "cancelled_tickets": tickets.filter(status=Ticket.Status.CANCELLED).count(),
-                "scan_attempts": scans.count(),
-                "entry_granted": scans.filter(
-                    result=TicketScan.Result.ENTRY_GRANTED
-                ).count(),
-                "scan_results": list(
-                    scans.values("result")
-                    .annotate(count=Count("id"))
-                    .order_by("result")
-                ),
+                "registrations": reg_stats["total"] or 0,
+                "online_registrations": reg_stats["online"] or 0,
+                "on_spot_registrations": reg_stats["on_spot"] or 0,
+                "active_tickets": ticket_stats["active"] or 0,
+                "used_tickets": ticket_stats["used"] or 0,
+                "cancelled_tickets": ticket_stats["cancelled"] or 0,
+                "scan_attempts": scan_attempts,
+                "entry_granted": entry_granted,
+                "scan_results": scan_results,
             }
         )
 

@@ -32,6 +32,8 @@ class Registration(models.Model):
         indexes = [
             models.Index(fields=("event", "created_at")),
             models.Index(fields=("source", "created_at")),
+            models.Index(fields=("-created_at",), name="reg_created_at_desc_idx"),
+            models.Index(fields=("buyer_email",), name="reg_buyer_email_idx"),
         ]
 
     def __str__(self):

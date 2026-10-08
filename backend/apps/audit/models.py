@@ -20,4 +20,7 @@ class AuditLog(models.Model):
 
     class Meta:
         ordering = ("-created_at",)
-        indexes = [models.Index(fields=("resource_type", "resource_id", "created_at"))]
+        indexes = [
+            models.Index(fields=("resource_type", "resource_id", "created_at")),
+            models.Index(fields=("-created_at",), name="audit_created_at_desc_idx"),
+        ]

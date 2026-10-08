@@ -146,6 +146,43 @@ export const LandingPage: React.FC = () => {
           />
         </section>
 
+        <section className="festival-organizers" aria-labelledby="festival-organizers-title">
+          <h2 id="festival-organizers-title" className="festival-organizers__title">Presented by</h2>
+          <div className="festival-organizers__logos" aria-label="Event organisers">
+            <figure className="festival-organizers__item">
+              <img
+                src="/sims-logo.png"
+                srcSet="/sims-logo.webp"
+                alt="Soundarya Institute of Management and Science logo"
+                loading="lazy"
+                decoding="async"
+              />
+              <figcaption>Soundarya Institute<br />of Management and Science</figcaption>
+            </figure>
+            <figure className="festival-organizers__item">
+              <img
+                src="/daksha-student-council-emblem.png"
+                srcSet="/daksha-student-council-emblem.webp"
+                alt="Daksha logo"
+                loading="lazy"
+                decoding="async"
+              />
+              <figcaption>DAKSHA Student Council Team</figcaption>
+            </figure>
+          </div>
+          <p className="festival-organizers__support-title">Supported by</p>
+          <figure className="festival-organizers__support">
+            <img
+              className="festival-organizers__support-logo"
+              src="/rotaract-club-sims.jpeg"
+              alt="SIMS Rotaract Club logo"
+              loading="lazy"
+              decoding="async"
+            />
+            <figcaption>SIMS Rotaract Club</figcaption>
+          </figure>
+        </section>
+
         <section id="celebration" className="festival-experience">
           <div className="festival-experience__ornament festival-experience__ornament--left" aria-hidden="true" />
           <div className="festival-experience__ornament festival-experience__ornament--right" aria-hidden="true" />
@@ -189,7 +226,7 @@ export const LandingPage: React.FC = () => {
               <p className="festival-about__body">
                 When the evening lights up, the circle comes alive. Gather your friends for a joyful
                 celebration of Garba, Dandiya, and the colour of tradition—hosted by Daksha Student
-                Council at Soundarya Institute.
+                Council and supported by SIMS Rotaract Club at Soundarya Institute.
               </p>
               <div className="festival-about__signature">
                 <span className="festival-about__signature-mark"><Flower2 /></span>

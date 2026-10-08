@@ -119,4 +119,4 @@ class RegistrationListSerializer(serializers.Serializer):
         }
 
     def get_ticket_ids(self, registration):
-        return list(registration.tickets.values_list("id", flat=True))
+        return [ticket.id for ticket in registration.tickets.all()]

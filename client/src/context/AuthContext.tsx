@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { StaffUser } from '../types';
 import { authApi } from '../api/auth';
 
@@ -15,12 +16,24 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<StaffUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const location = useLocation();
 
   useEffect(() => {
+    const isProtectedStaffRoute = location.pathname.startsWith('/staff') && !location.pathname.startsWith('/staff/login');
+    const requiresAuth = isProtectedStaffRoute || location.pathname.startsWith('/admin');
+    if (!requiresAuth) {
+      setIsLoading(false);
+      return;
+    }
+
     let active = true;
+    setIsLoading(true);
     authApi.getCurrentUser()
       .then((currentUser) => {
         if (active) setUser(currentUser);
+      })
+      .catch(() => {
+        if (active) setUser(null);
       })
       .finally(() => {
         if (active) setIsLoading(false);
@@ -28,7 +41,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => {
       active = false;
     };
-  }, []);
+  }, [location.pathname]);
 
   const login = async (email: string, password: string) => {
     const loggedIn = await authApi.login(email, password);

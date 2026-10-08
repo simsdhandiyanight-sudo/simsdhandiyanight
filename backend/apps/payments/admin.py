@@ -6,8 +6,12 @@ from .models import EmailDailyUsage, Payment, PaymentIntent, TicketDelivery
 @admin.register(PaymentIntent)
 class PaymentIntentAdmin(admin.ModelAdmin):
     list_display = ("idempotency_key", "event", "ticket_tier", "status", "created_at")
+    list_select_related = ("event", "ticket_tier", "ticket_tier__event", "registration")
     list_filter = ("status", "event", "created_at")
     search_fields = ("idempotency_key", "buyer_email", "buyer_name")
+    raw_id_fields = ("registration",)
+    list_per_page = 25
+    show_full_result_count = False
     readonly_fields = (
         "idempotency_key",
         "request_hash",
@@ -45,6 +49,7 @@ class PaymentAdmin(admin.ModelAdmin):
         "verification_status",
         "ticket_issuance_status",
     )
+    list_select_related = ("intent", "intent__event", "intent__registration")
     list_filter = (
         "status",
         "verification_status",
@@ -53,6 +58,9 @@ class PaymentAdmin(admin.ModelAdmin):
         "created_at",
     )
     search_fields = ("id", "razorpay_order_id", "razorpay_payment_id")
+    raw_id_fields = ("intent",)
+    list_per_page = 25
+    show_full_result_count = False
     readonly_fields = (
         "id",
         "intent",
@@ -93,8 +101,12 @@ class TicketDeliveryAdmin(admin.ModelAdmin):
         "last_attempt_at",
         "updated_at",
     )
+    list_select_related = ("ticket", "ticket__registration", "ticket__registration__event")
     list_filter = ("status", "priority", "created_at")
     search_fields = ("id", "ticket__id", "recipient", "provider_message_id")
+    raw_id_fields = ("ticket",)
+    list_per_page = 25
+    show_full_result_count = False
     readonly_fields = (
         "id",
         "ticket",
@@ -104,7 +116,7 @@ class TicketDeliveryAdmin(admin.ModelAdmin):
         "provider_message_id",
         "attempt_count",
         "failure_reason",
-        "pdf_content",
+        "pdf_size",
         "quota_date",
         "quota_reserved",
         "claim_token",
@@ -116,6 +128,15 @@ class TicketDeliveryAdmin(admin.ModelAdmin):
         "created_at",
         "updated_at",
     )
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).defer("pdf_content")
+
+    @admin.display(description="PDF Content")
+    def pdf_size(self, obj):
+        if not obj or not obj.pdf_content:
+            return "Not generated"
+        return f"Generated ({len(obj.pdf_content) / 1024:.1f} KB)"
 
 
 @admin.register(EmailDailyUsage)
@@ -138,5 +159,7 @@ class EmailDailyUsageAdmin(admin.ModelAdmin):
     )
     ordering = ("-date",)
     date_hierarchy = "date"
+    list_per_page = 25
+    show_full_result_count = False
     has_add_permission = lambda self, request: False
     has_delete_permission = lambda self, request, obj=None: False

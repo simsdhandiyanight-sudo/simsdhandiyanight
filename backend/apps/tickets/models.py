@@ -27,7 +27,11 @@ class Ticket(models.Model):
 
     class Meta:
         ordering = ("created_at",)
-        indexes = [models.Index(fields=("registration", "status"))]
+        indexes = [
+            models.Index(fields=("registration", "status")),
+            models.Index(fields=("created_at",), name="ticket_created_at_idx"),
+            models.Index(fields=("status", "created_at"), name="ticket_status_created_idx"),
+        ]
         constraints = [
             models.CheckConstraint(
                 condition=(

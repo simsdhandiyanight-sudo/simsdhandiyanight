@@ -55,6 +55,7 @@ class TicketScan(models.Model):
             models.Index(fields=("event", "scanned_at")),
             models.Index(fields=("ticket", "scanned_at")),
             models.Index(fields=("result", "scanned_at")),
+            models.Index(fields=("-scanned_at",), name="scan_scanned_at_desc_idx"),
         ]
         constraints = [
             models.UniqueConstraint(
