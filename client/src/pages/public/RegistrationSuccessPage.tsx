@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { ArrowRight, CheckCircle2, Ticket as TicketIcon } from 'lucide-react';
+import { ArrowRight, CheckCircle2, Download, Ticket as TicketIcon } from 'lucide-react';
+import { apiBlob } from '../../api/http';
 import { Navbar } from '../../components/common/Navbar';
 import { Footer } from '../../components/common/Footer';
 import { FestivalMotifs } from '../../components/common/FestivalMotifs';
@@ -9,10 +10,34 @@ import { Registration, Ticket } from '../../types';
 
 export const RegistrationSuccessPage: React.FC = () => {
   const location = useLocation();
+  const [isDownloadingBundle, setIsDownloadingBundle] = useState(false);
+  const [bundleDownloadError, setBundleDownloadError] = useState('');
   const state = location.state as { registration?: Registration; ticket?: Ticket; tickets?: Ticket[] } | undefined;
   const registration = state?.registration;
   const ticket = state?.ticket;
   const tickets = state?.tickets ?? (ticket ? [ticket] : []);
+
+  const downloadAllTickets = async () => {
+    setIsDownloadingBundle(true);
+    setBundleDownloadError('');
+    try {
+      if (!registration) throw new Error('Registration details are unavailable.');
+      const pdf = await apiBlob(
+        `/registrations/${encodeURIComponent(registration.id)}/tickets.pdf`,
+      );
+      const url = URL.createObjectURL(pdf);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `tickets-${registration.id}.pdf`;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) {
+      console.error('Failed to generate combo ticket PDF.', error);
+      setBundleDownloadError('Tickets could not be downloaded. Please try again.');
+    } finally {
+      setIsDownloadingBundle(false);
+    }
+  };
 
   return (
     <div className="festival-public flex min-h-screen flex-col bg-slate-950 text-slate-100">
@@ -34,7 +59,10 @@ export const RegistrationSuccessPage: React.FC = () => {
                   Registration confirmed
                 </h1>
                 <p className="mx-auto max-w-md text-sm leading-relaxed text-slate-400">
-                  {tickets.length === 1 ? 'Your demo pass is ready.' : `Your ${tickets.length} demo passes are ready.`} This prototype stores registration data in this browser; it is not valid real-world event admission.
+                  {tickets.length === 1
+                    ? 'Your payment is verified and your ticket is ready.'
+                    : `Your payment is verified and all ${tickets.length} tickets are ready.`}
+                  {' '}Keep the QR code available for entry.
                 </p>
               </div>
               <div className="inline-flex max-w-full flex-wrap items-center justify-center gap-x-3 gap-y-1 rounded-xl border border-slate-800 bg-slate-900 px-4 py-2 font-mono text-xs text-slate-300">
@@ -51,10 +79,33 @@ export const RegistrationSuccessPage: React.FC = () => {
                       Admission {index + 1} of {tickets.length}
                     </h2>
                   )}
-                  <DigitalTicket ticket={issuedTicket} showActions />
+                  <DigitalTicket
+                    ticket={issuedTicket}
+                    showActions
+                  />
                 </section>
               ))}
             </div>
+
+            {tickets.length > 1 && (
+              <div className="mx-auto mb-6 max-w-md">
+                <button
+                  type="button"
+                  onClick={() => void downloadAllTickets()}
+                  disabled={isDownloadingBundle}
+                  aria-busy={isDownloadingBundle}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-rose-700 to-fuchsia-700 px-4 py-3 text-sm font-semibold text-white shadow-md transition-colors hover:from-rose-800 hover:to-fuchsia-800 disabled:cursor-wait disabled:opacity-60"
+                >
+                  <Download className="h-4 w-4" />
+                  <span>{isDownloadingBundle ? 'Preparing all tickets…' : `Download all ${tickets.length} tickets (PDF)`}</span>
+                </button>
+                {bundleDownloadError && (
+                  <p role="alert" className="mt-2 text-center text-xs text-rose-700">
+                    {bundleDownloadError}
+                  </p>
+                )}
+              </div>
+            )}
 
             <div className="mx-auto grid max-w-md grid-cols-1 gap-3 border-t border-slate-800 pt-6 sm:grid-cols-2">
               <Link

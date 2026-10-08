@@ -16,6 +16,7 @@ class Ticket(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     registration = models.ForeignKey("registrations.Registration", on_delete=models.PROTECT, related_name="tickets")
+    attendee_name = models.CharField(max_length=200, blank=True, default="")
     token = models.CharField(max_length=64, unique=True, default=create_ticket_token, editable=False)
     status = models.CharField(max_length=12, choices=Status.choices, default=Status.ISSUED)
     issued_at = models.DateTimeField(auto_now_add=True)

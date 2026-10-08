@@ -1,13 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { eventsApi } from '../../api/events';
-import { registrationsApi } from '../../api/registrations';
+import { eventsApi, FEATURED_EVENT_SLUG } from '../../api/events';
+import { paymentsApi } from '../../api/payments';
+import { clearRegistrationIdempotencyKey } from '../../api/registrations';
+import { mapRegistration, mapTicket } from '../../api/serializers';
 import { EventItem } from '../../types';
 import { Navbar } from '../../components/common/Navbar';
 import { Footer } from '../../components/common/Footer';
 import { FestivalMotifs } from '../../components/common/FestivalMotifs';
 import { FestivalPoster } from '../../components/common/FestivalPoster';
-import { FEATURED_EVENT_SLUG } from '../../api/events';
 import {
   CheckCircle2,
   ArrowRight,
@@ -17,6 +18,15 @@ import {
   MapPin,
   AlertCircle,
 } from 'lucide-react';
+
+declare global {
+  interface Window {
+    Razorpay?: new (options: Record<string, unknown>) => {
+      open: () => void;
+      on: (event: string, callback: (payload: Record<string, unknown>) => void) => void;
+    };
+  }
+}
 
 export const RegistrationPage: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -30,6 +40,7 @@ export const RegistrationPage: React.FC = () => {
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const submittingRef = useRef(false);
 
   // Form state
   const [fullName, setFullName] = useState('');
@@ -38,7 +49,9 @@ export const RegistrationPage: React.FC = () => {
   const [organization, setOrganization] = useState('');
   const [jobTitle, setJobTitle] = useState('');
   const [selectedTierId, setSelectedTierId] = useState<string>('');
+  const [attendeeNames, setAttendeeNames] = useState<string[]>([]);
   const [agreeTerms, setAgreeTerms] = useState(false);
+  const [readTerms, setReadTerms] = useState(false);
 
   // Field validation errors
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -63,6 +76,16 @@ export const RegistrationPage: React.FC = () => {
     });
     return () => { cancelled = true; };
   }, [searchParams]);
+
+  useEffect(() => {
+    if (document.getElementById('razorpay-checkout-script')) return;
+
+    const script = document.createElement('script');
+    script.id = 'razorpay-checkout-script';
+    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    script.async = true;
+    document.body.appendChild(script);
+  }, []);
 
   if (loadingEvent) {
     return (
@@ -155,35 +178,222 @@ export const RegistrationPage: React.FC = () => {
     }
   };
 
+  const handleReviewTier = () => {
+    if (selectedTier?.admissionCount === 4) {
+      const names = [fullName, ...attendeeNames.slice(0, 3)];
+      const hasInvalidName = names.some((name) => getFieldError('fullName', name));
+      if (hasInvalidName) {
+        setErrorMessage('Enter a valid name for each of the four attendees.');
+        return;
+      }
+    }
+    setErrorMessage('');
+    setStep(3);
+  };
+
   const handleSubmitRegistration = async () => {
+    if (submittingRef.current) return;
     if (!agreeTerms) {
       setErrorMessage('Please accept the event admission terms before confirming.');
       return;
     }
 
+    if (!selectedTier) {
+      setErrorMessage('Select an available ticket offer before continuing.');
+      return;
+    }
+
+    submittingRef.current = true;
     setIsSubmitting(true);
     setErrorMessage('');
 
     try {
-      const { registration, ticket, tickets } = await registrationsApi.create({
+      const buyer = {
+        name: fullName,
+        email,
+        phone: `+91${phone}`,
+        organization: organization.trim() || '',
+        job_title: jobTitle.trim() || '',
+      };
+      const registrationParams = {
         eventId: event.id,
-        attendee: {
-          fullName,
-          email,
-          phone: `+91${phone}`,
-          organization: organization.trim() || undefined,
-          jobTitle: jobTitle.trim() || undefined,
-        },
         tierId: selectedTier.id,
-        source: 'ONLINE',
+        source: 'ONLINE' as const,
+        attendee: {
+          fullName: buyer.name,
+          email: buyer.email,
+          phone: buyer.phone,
+          organization: buyer.organization,
+          jobTitle: buyer.job_title,
+        },
+        attendeeNames:
+          selectedTier.admissionCount === 4
+            ? [fullName, ...attendeeNames.slice(0, 3)]
+            : [fullName],
+      };
+      const order = await paymentsApi.createOrder(registrationParams);
+
+      const showVerifiedRegistration = async (data: {
+        registration: Parameters<typeof mapRegistration>[0];
+        ticket?: Parameters<typeof mapTicket>[0];
+        tickets: Parameters<typeof mapTicket>[0][];
+      }) => {
+        const tickets = data.tickets.map(mapTicket);
+        const registration = mapRegistration(data.registration);
+        navigate('/registration/success', {
+          state: {
+            registration,
+            ticket: tickets[0] ?? (data.ticket ? mapTicket(data.ticket) : undefined),
+            tickets,
+          },
+        });
+      };
+
+      const existingRegistration = order.registration;
+      const existingTickets = order.tickets;
+      if (order.payment_verified && existingRegistration && existingTickets) {
+        await clearRegistrationIdempotencyKey(registrationParams);
+        await showVerifiedRegistration({
+          registration: existingRegistration,
+          ticket: order.ticket,
+          tickets: existingTickets,
+        });
+        return;
+      }
+      if (!order.key_id || !order.order_id || !order.amount || !order.currency) {
+        throw new Error('Payment is not configured for this event right now. Please try again later.');
+      }
+
+      const recoveryKey = `ticketing.payment-recovery.${order.idempotency_key}`;
+      const serializedRecovery = sessionStorage.getItem(recoveryKey);
+      if (serializedRecovery) {
+        let recovery: {
+          order_id?: string;
+          razorpay_order_id?: string;
+          razorpay_payment_id?: string;
+          razorpay_signature?: string;
+        };
+        try {
+          recovery = JSON.parse(serializedRecovery) as typeof recovery;
+        } catch {
+          sessionStorage.removeItem(recoveryKey);
+          recovery = {};
+        }
+        if (
+          recovery.razorpay_order_id === order.order_id &&
+          recovery.razorpay_payment_id &&
+          recovery.razorpay_signature
+        ) {
+          const verified = await paymentsApi.verify({
+            razorpay_order_id: recovery.razorpay_order_id,
+            razorpay_payment_id: recovery.razorpay_payment_id,
+            razorpay_signature: recovery.razorpay_signature,
+          });
+          sessionStorage.removeItem(recoveryKey);
+          await clearRegistrationIdempotencyKey(registrationParams);
+          await showVerifiedRegistration(verified);
+          return;
+        }
+      }
+
+      const Razorpay = window.Razorpay;
+      if (!Razorpay) {
+        throw new Error('Razorpay checkout is unavailable in this browser.');
+      }
+
+      let paymentCallbackStarted = false;
+      const razorpayInstance = new Razorpay({
+        key: order.key_id,
+        amount: order.amount,
+        currency: order.currency,
+        name: event.name,
+        description: selectedTier.name,
+        order_id: order.order_id,
+        prefill: {
+          name: fullName,
+          email,
+          contact: `+91${phone}`,
+        },
+        theme: {
+          color: '#b71959',
+        },
+        handler: async (paymentResponse: Record<string, unknown>) => {
+          if (paymentCallbackStarted) return;
+          paymentCallbackStarted = true;
+          let paymentVerified = false;
+          try {
+            const razorpayOrderId = paymentResponse.razorpay_order_id;
+            const razorpayPaymentId = paymentResponse.razorpay_payment_id;
+            const razorpaySignature = paymentResponse.razorpay_signature;
+            if (
+              typeof razorpayOrderId !== 'string' ||
+              typeof razorpayPaymentId !== 'string' ||
+              typeof razorpaySignature !== 'string'
+            ) {
+              throw new Error('Razorpay returned an incomplete payment response.');
+            }
+            sessionStorage.setItem(
+              recoveryKey,
+              JSON.stringify({
+                razorpay_order_id: razorpayOrderId,
+                razorpay_payment_id: razorpayPaymentId,
+                razorpay_signature: razorpaySignature,
+              }),
+            );
+            const verification = await paymentsApi.verify({
+              razorpay_order_id: razorpayOrderId,
+              razorpay_payment_id: razorpayPaymentId,
+              razorpay_signature: razorpaySignature,
+            });
+            if (!verification.payment_verified) {
+              throw new Error('Payment verification failed. Contact the event team before trying again.');
+            }
+            paymentVerified = true;
+            sessionStorage.removeItem(recoveryKey);
+            await clearRegistrationIdempotencyKey(registrationParams);
+            await showVerifiedRegistration(verification);
+          } catch (error: unknown) {
+            setErrorMessage(
+              paymentVerified
+                ? `Payment was verified and your tickets are being prepared: ${error instanceof Error ? error.message : 'Unexpected error.'} Retry this registration with the same details to recover the confirmation.`
+                : `We could not confirm the payment response: ${error instanceof Error ? error.message : 'Unexpected error.'} Your payment details have been retained for safe retry. Do not pay again until you retry this registration.`,
+            );
+            submittingRef.current = false;
+            setIsSubmitting(false);
+          }
+        },
+        modal: {
+          ondismiss: () => {
+            submittingRef.current = false;
+            setIsSubmitting(false);
+          },
+        },
       });
 
-      // Pass state to success page
-      navigate('/registration/success', {
-        state: { registration, ticket, tickets },
+      razorpayInstance.on('payment.failed', (failure: Record<string, unknown>) => {
+        const details = failure.error;
+        void paymentsApi.recordFailure({
+          razorpay_order_id: order.order_id!,
+        }).catch((error: unknown) => {
+          console.error('Unable to record Razorpay payment failure.', error);
+        });
+        const message =
+          typeof details === 'object' && details !== null
+            ? 'description' in details && typeof details.description === 'string'
+              ? details.description
+              : 'reason' in details && typeof details.reason === 'string'
+                ? details.reason
+                : 'Payment failed. Please try again.'
+            : 'Payment failed. Please try again.';
+        setErrorMessage(message);
+        submittingRef.current = false;
+        setIsSubmitting(false);
       });
+
+      razorpayInstance.open();
     } catch (err: unknown) {
       setErrorMessage(err instanceof Error ? err.message : 'Registration failed. Please try again.');
+      submittingRef.current = false;
       setIsSubmitting(false);
     }
   };
@@ -219,7 +429,7 @@ export const RegistrationPage: React.FC = () => {
           </div>
         </div>
         <p className="mb-6 rounded-xl border border-amber-900/60 bg-amber-950/30 px-4 py-3 text-xs leading-relaxed text-amber-200">
-          Demo only: pass availability is sample data. Prices are before applicable taxes; no payment or real event admission is processed.
+          Payments are processed in Razorpay Test Mode. Applicable taxes have not been configured; your ticket is issued only after payment verification.
         </p>
 
         {!registrationAvailable ? (
@@ -469,10 +679,56 @@ export const RegistrationPage: React.FC = () => {
               })}
             </div>
 
+            {selectedTier?.admissionCount === 4 && (
+              <section className="mt-6 border-t border-slate-800 pt-5" aria-labelledby="combo-attendees-heading">
+                <h3 id="combo-attendees-heading" className="text-sm font-bold text-white">
+                  Attendee names <span className="text-rose-400">*</span>
+                </h3>
+                <p className="mt-1 text-xs text-slate-400">
+                  Enter the name for each of the four individual tickets. Buyer email and mobile are shared.
+                </p>
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1.5 block text-xs font-semibold text-slate-300">Attendee 1 name</label>
+                    <p className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-2.5 text-xs text-white">{fullName}</p>
+                  </div>
+                  {Array.from({ length: 3 }, (_, index) => (
+                    <div key={index}>
+                      <label htmlFor={`combo-attendee-${index + 2}`} className="mb-1.5 block text-xs font-semibold text-slate-300">
+                        Attendee {index + 2} name <span className="text-rose-400">*</span>
+                      </label>
+                      <input
+                        id={`combo-attendee-${index + 2}`}
+                        type="text"
+                        required
+                        maxLength={80}
+                        value={attendeeNames[index] ?? ''}
+                        onChange={(e) => {
+                          const nextNames = [...attendeeNames];
+                          nextNames[index] = e.target.value;
+                          setAttendeeNames(nextNames);
+                          setErrorMessage('');
+                        }}
+                        placeholder={`Full name for ticket ${index + 2}`}
+                        className="w-full rounded-xl border border-slate-800 bg-slate-950 px-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {errorMessage && (
+              <p role="alert" className="text-xs text-rose-400">{errorMessage}</p>
+            )}
+
             <div className="pt-4 border-t border-slate-800 flex justify-between items-center">
               <button
                 type="button"
-                onClick={() => setStep(1)}
+                onClick={() => {
+                  setErrorMessage('');
+                  setStep(1);
+                }}
                 className="px-4 py-2.5 text-xs text-slate-400 hover:text-white inline-flex items-center gap-1.5 cursor-pointer"
               >
                 <ArrowLeft className="w-4 h-4" />
@@ -481,7 +737,7 @@ export const RegistrationPage: React.FC = () => {
 
               <button
                 type="button"
-                onClick={() => setStep(3)}
+                onClick={handleReviewTier}
                 disabled={!selectedTier || availablePackages(selectedTier) < 1}
                 className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold inline-flex items-center gap-2 cursor-pointer transition-all shadow-md"
               >
@@ -550,18 +806,56 @@ export const RegistrationPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Terms Checkbox */}
-            <label className="flex items-start gap-3 p-3 bg-slate-950/60 border border-slate-800 rounded-xl cursor-pointer text-xs text-slate-300">
-              <input
-                type="checkbox"
-                checked={agreeTerms}
-                onChange={(e) => setAgreeTerms(e.target.checked)}
-                className="mt-0.5 rounded border-slate-700 text-indigo-600 focus:ring-indigo-500"
-              />
-              <span>
-                I agree to the Event Code of Conduct and acknowledge that tickets are tied to this badge name for rapid gate verification.
-              </span>
-            </label>
+            <section aria-labelledby="terms-heading" className="space-y-3">
+              <div>
+                <h3 id="terms-heading" className="text-sm font-bold text-white">Terms &amp; Conditions</h3>
+                <p className="mt-1 text-xs text-slate-400">
+                  Read all the event rules below. Scroll to the end to enable agreement.
+                </p>
+              </div>
+              <div
+                role="region"
+                aria-label="Terms and Conditions"
+                tabIndex={0}
+                onScroll={(e) => {
+                  const element = e.currentTarget;
+                  if (element.scrollTop + element.clientHeight >= element.scrollHeight - 4) {
+                    setReadTerms(true);
+                  }
+                }}
+                className="max-h-56 overflow-y-auto rounded-xl border border-slate-800 bg-slate-950/60 p-4 text-xs text-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                <ul className="list-disc space-y-2 pl-5">
+                  <li>Carry your ticket and valid ID. Arrive 1 hour early for entry and security checking.</li>
+                  <li>Tickets are non-transferable and non-refundable. No re-entry after exit.</li>
+                  <li>One pair of Dandiya sticks and refreshments are included with each ticket.</li>
+                  <li>Traditional/ethnic wear is recommended.</li>
+                  <li>Outside food, beverages, and water bottles are not allowed.</li>
+                  <li>Alcohol, smoking, drugs, weapons, and sharp objects are strictly prohibited.</li>
+                  <li>Security and bag checks will be conducted at the entrance.</li>
+                  <li>The organizers reserve the right of admission and are not responsible for lost belongings.</li>
+                  <li>Any misconduct or violation of rules may result in immediate eviction without refund.</li>
+                </ul>
+              </div>
+              <label className={`flex items-start gap-3 rounded-xl border p-3 text-xs ${
+                readTerms
+                  ? 'cursor-pointer border-slate-800 bg-slate-950/60 text-slate-300'
+                  : 'cursor-not-allowed border-slate-800/60 bg-slate-950/30 text-slate-500'
+              }`}>
+                <input
+                  type="checkbox"
+                  checked={agreeTerms}
+                  disabled={!readTerms}
+                  onChange={(e) => setAgreeTerms(e.target.checked)}
+                  className="mt-0.5 rounded border-slate-700 text-indigo-600 focus:ring-indigo-500"
+                />
+                <span>
+                  {readTerms
+                    ? 'I have read and agree to the Terms & Conditions.'
+                    : 'Scroll through all Terms & Conditions above before agreeing.'}
+                </span>
+              </label>
+            </section>
 
             {/* Buttons */}
             <div className="pt-4 border-t border-slate-800 flex justify-between items-center">
@@ -578,18 +872,18 @@ export const RegistrationPage: React.FC = () => {
               <button
                 type="button"
                 onClick={handleSubmitRegistration}
-                disabled={isSubmitting}
+                disabled={isSubmitting || !readTerms || !agreeTerms}
                 className="px-8 py-3.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold uppercase tracking-wider inline-flex items-center gap-2 cursor-pointer transition-all shadow-lg shadow-indigo-600/30"
               >
                 {isSubmitting ? (
                   <>
                     <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    <span>Generating Ticket...</span>
+                    <span>Opening Secure Checkout...</span>
                   </>
                 ) : (
                   <>
                     <CheckCircle2 className="w-4 h-4" />
-                    <span>CONFIRM &amp; ISSUE PASS</span>
+                    <span>PAY &amp; ISSUE PASS</span>
                   </>
                 )}
               </button>

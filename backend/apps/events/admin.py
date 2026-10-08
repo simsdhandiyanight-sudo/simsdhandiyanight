@@ -14,3 +14,26 @@ class EventAdmin(admin.ModelAdmin):
     list_filter = ("status", "registration_open")
     search_fields = ("name", "slug")
     inlines = (TicketTierInline,)
+    fields = (
+        "slug",
+        "name",
+        "tagline",
+        "description",
+        "category",
+        "start_at",
+        "end_at",
+        "reporting_time",
+        "venue",
+        "city",
+        "address",
+        "location_url",
+        "rules_and_regulations",
+        "instructions",
+        "status",
+        "registration_open",
+        "capacity",
+        "highlights",
+        "schedule",
+        "faqs",
+        "accent_color",
+    )

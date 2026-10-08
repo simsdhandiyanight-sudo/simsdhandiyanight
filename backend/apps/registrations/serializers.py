@@ -25,6 +25,23 @@ class CreateRegistrationSerializer(serializers.Serializer):
     event_id = serializers.UUIDField()
     ticket_tier_id = serializers.UUIDField()
     buyer = BuyerSerializer()
+    attendee_names = serializers.ListField(
+        child=serializers.CharField(max_length=200, trim_whitespace=True),
+        required=False,
+        allow_empty=False,
+        max_length=10,
+    )
+
+    def validate_attendee_names(self, names):
+        for name in names:
+            if not name or not all(
+                character.isalpha() or character in " '-\u2019"
+                for character in name
+            ):
+                raise serializers.ValidationError(
+                    "Use letters, spaces, apostrophes, or hyphens for attendee names."
+                )
+        return names
 
 
 class RegistrationTicketSerializer(serializers.Serializer):
@@ -33,6 +50,7 @@ class RegistrationTicketSerializer(serializers.Serializer):
     event_id = serializers.UUIDField(source="registration.event_id")
     event_name = serializers.CharField(source="registration.event.name")
     buyer_name = serializers.CharField(source="registration.buyer_name")
+    attendee_name = serializers.SerializerMethodField()
     tier_name = serializers.CharField(source="registration.ticket_tier.name")
     source = serializers.CharField(source="registration.source")
     status = serializers.CharField()
@@ -43,6 +61,9 @@ class RegistrationTicketSerializer(serializers.Serializer):
     used_at = serializers.DateTimeField(allow_null=True)
     cancelled_at = serializers.DateTimeField(allow_null=True)
     qr_token = serializers.CharField(source="token")
+
+    def get_attendee_name(self, ticket):
+        return ticket.attendee_name or ticket.registration.buyer_name
 
     def get_event_date(self, ticket):
         return timezone.localtime(ticket.registration.event.start_at).date().isoformat()

@@ -22,8 +22,15 @@ class Command(BaseCommand):
                 "name": "Dhandiya Night 2026",
                 "tagline": "Dance · Dandiya · Dhamaka",
                 "description": (
-                    "Celebrate Navratri with an evening of Dandiya, music, and "
-                    "festive activities at Soundarya College Campus."
+                    "Celebrate the vibrant spirit of Navratri through Dandiya, "
+                    "a joyful celebration of music, dance, and togetherness.\n"
+                    "Get ready for an evening filled with rhythm, colours, energy, "
+                    "and festive vibes.\n"
+                    "Dance to lively beats and celebrate the season with friends, "
+                    "family, and loved ones.\n"
+                    "Put on your festive best and make memories that last beyond "
+                    "the night.\n"
+                    "Join us on 16th October and let the celebration begin"
                 ),
                 "category": "music",
                 "start_at": datetime(2026, 10, 16, 18, 0, tzinfo=IST),

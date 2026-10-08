@@ -9,6 +9,7 @@ class TicketSerializer(serializers.ModelSerializer):
     event_id = serializers.UUIDField(source="registration.event_id")
     event_name = serializers.CharField(source="registration.event.name")
     buyer_name = serializers.CharField(source="registration.buyer_name")
+    attendee_name = serializers.SerializerMethodField()
     tier_name = serializers.CharField(source="registration.ticket_tier.name")
     source = serializers.CharField(source="registration.source")
     venue = serializers.CharField(source="registration.event.venue")
@@ -27,6 +28,7 @@ class TicketSerializer(serializers.ModelSerializer):
             "event_id",
             "event_name",
             "buyer_name",
+            "attendee_name",
             "attendee_email",
             "attendee_phone",
             "tier_name",
@@ -44,6 +46,9 @@ class TicketSerializer(serializers.ModelSerializer):
 
     def get_event_date(self, ticket):
         return timezone.localtime(ticket.registration.event.start_at).date().isoformat()
+
+    def get_attendee_name(self, ticket):
+        return ticket.attendee_name or ticket.registration.buyer_name
 
     def get_event_time(self, ticket):
         event = ticket.registration.event

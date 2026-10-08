@@ -31,7 +31,7 @@ class TicketScanSerializer(serializers.ModelSerializer):
 
     def get_attendee_name(self, scan):
         if scan.ticket_id:
-            return scan.ticket.registration.buyer_name
+            return scan.ticket.attendee_name or scan.ticket.registration.buyer_name
         return "Unknown"
 
 
@@ -41,6 +41,7 @@ class ScannedTicketSerializer(serializers.Serializer):
     event_id = serializers.UUIDField(source="registration.event_id")
     event_name = serializers.CharField(source="registration.event.name")
     buyer_name = serializers.CharField(source="registration.buyer_name")
+    attendee_name = serializers.SerializerMethodField()
     tier_name = serializers.CharField(source="registration.ticket_tier.name")
     source = serializers.CharField(source="registration.source")
     status = serializers.CharField()
@@ -52,6 +53,9 @@ class ScannedTicketSerializer(serializers.Serializer):
     cancelled_at = serializers.DateTimeField(allow_null=True)
     gate = serializers.SerializerMethodField()
     qr_token = serializers.SerializerMethodField()
+
+    def get_attendee_name(self, ticket):
+        return ticket.attendee_name or ticket.registration.buyer_name
 
     def get_event_date(self, ticket):
         from django.utils import timezone

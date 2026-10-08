@@ -12,31 +12,35 @@ export class ApiError extends Error {
   }
 }
 
-let csrfPromise: Promise<void> | undefined;
-
-const csrfToken = (): string | undefined => {
-  const entry = document.cookie
-    .split('; ')
-    .find((item) => item.startsWith('csrftoken='));
-  return entry ? decodeURIComponent(entry.slice('csrftoken='.length)) : undefined;
-};
+let csrfPromise: Promise<string> | undefined;
 
 const ensureCsrfToken = async (): Promise<string> => {
-  if (!csrfToken()) {
-    csrfPromise ??= fetch(`${API_BASE}/auth/csrf/`, {
-      credentials: 'same-origin',
+  csrfPromise ??= fetch(`${API_BASE}/auth/csrf/`, {
+    credentials: 'include',
+  })
+    .then(async (response) => {
+      if (!response.ok) {
+        throw new ApiError('Unable to initialize secure session.', response.status, 'CSRF_ERROR', undefined);
+      }
+      const data: unknown = await response.json();
+      if (
+        typeof data !== 'object'
+        || data === null
+        || !('csrfToken' in data)
+        || typeof data.csrfToken !== 'string'
+      ) {
+        throw new ApiError('Unable to initialize secure session.', response.status, 'CSRF_ERROR', undefined);
+      }
+      return data.csrfToken;
     })
-      .then((response) => {
-        if (!response.ok) throw new ApiError('Unable to initialize secure session.', response.status, 'CSRF_ERROR', undefined);
-      })
-      .finally(() => {
-        csrfPromise = undefined;
-      });
-    await csrfPromise;
-  }
-  const token = csrfToken();
-  if (!token) throw new ApiError('Unable to initialize secure session.', 0, 'CSRF_ERROR', undefined);
-  return token;
+    .catch((error: unknown) => {
+      if (error instanceof ApiError) throw error;
+      throw new ApiError('Unable to initialize secure session.', 0, 'NETWORK_ERROR', undefined);
+    })
+    .finally(() => {
+      csrfPromise = undefined;
+    });
+  return csrfPromise;
 };
 
 const responseData = async (response: Response): Promise<unknown> => {
@@ -84,7 +88,7 @@ export async function apiRequest<T>(
       ...options,
       method,
       headers,
-      credentials: 'same-origin',
+      credentials: 'include',
     });
   } catch {
     throw new ApiError('Unable to reach the ticketing service. Check the connection and try again.', 0, 'NETWORK_ERROR', undefined);
@@ -100,7 +104,7 @@ export async function apiRequest<T>(
 
 export async function apiBlob(path: string): Promise<Blob> {
   const response = await fetch(`${API_BASE}${path.startsWith('/') ? path : `/${path}`}`, {
-    credentials: 'same-origin',
+    credentials: 'include',
   });
   if (!response.ok) {
     const data = await responseData(response);

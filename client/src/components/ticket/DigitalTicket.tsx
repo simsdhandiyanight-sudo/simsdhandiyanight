@@ -1,8 +1,9 @@
-import React, { useRef, useState } from 'react';
+import React, { useState } from 'react';
 import { Ticket as TicketType } from '../../types';
 import { QRCodeDisplay } from './QRCodeDisplay';
 import { Badge } from '../common/Badge';
 import { Copy, Check, Download, MapPin, Calendar, Clock, Sparkles } from 'lucide-react';
+import { apiBlob } from '../../api/http';
 
 interface DigitalTicketProps {
   ticket: TicketType;
@@ -10,7 +11,6 @@ interface DigitalTicketProps {
 }
 
 export const DigitalTicket: React.FC<DigitalTicketProps> = ({ ticket, showActions = true }) => {
-  const ticketRef = useRef<HTMLDivElement>(null);
   const [copiedValue, setCopiedValue] = useState('');
   const [copyMessage, setCopyMessage] = useState('');
   const [isDownloading, setIsDownloading] = useState(false);
@@ -29,37 +29,16 @@ export const DigitalTicket: React.FC<DigitalTicketProps> = ({ ticket, showAction
   };
 
   const handleDownloadTicket = async () => {
-    if (!ticketRef.current) {
-      setDownloadError('Ticket is not ready to download. Please try again.');
-      return;
-    }
-
     setIsDownloading(true);
     setDownloadError('');
     try {
-      const [{ toPng }, { jsPDF }] = await Promise.all([
-        import('html-to-image'),
-        import('jspdf'),
-      ]);
-      await document.fonts.ready;
-      const ticketImage = await toPng(ticketRef.current, {
-        backgroundColor: '#fffaf0',
-        filter: (element) => !(element instanceof HTMLButtonElement),
-        pixelRatio: 2,
-        skipFonts: true,
-      });
-      const pageWidth = 105;
-      const image = new Image();
-      image.src = ticketImage;
-      await image.decode();
-      const pageHeight = pageWidth * (image.height / image.width);
-      const pdf = new jsPDF({
-        orientation: 'portrait',
-        unit: 'mm',
-        format: [pageWidth, pageHeight],
-      });
-      pdf.addImage(ticketImage, 'PNG', 0, 0, pageWidth, pageHeight);
-      pdf.save(`${ticket.id}.pdf`);
+      const pdf = await apiBlob(`/tickets/${encodeURIComponent(ticket.id)}/pdf/`);
+      const url = URL.createObjectURL(pdf);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${ticket.id}.pdf`;
+      link.click();
+      URL.revokeObjectURL(url);
     } catch (error) {
       console.error('Failed to generate ticket PDF.', error);
       setDownloadError('Ticket could not be downloaded. Please try again.');
@@ -95,7 +74,6 @@ export const DigitalTicket: React.FC<DigitalTicketProps> = ({ ticket, showAction
     <div className="flex flex-col items-center max-w-md w-full mx-auto">
       {/* Physical Ticket Shell */}
       <div
-        ref={ticketRef}
         className="festival-ticket-shell w-full bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl relative transition-all duration-200"
       >
         {/* Top Header Foil Strip */}

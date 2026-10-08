@@ -156,7 +156,7 @@ The Dhandiya Night offers currently configured in the product UI are:
 - Single Ticket: one admission for ₹149 before applicable taxes.
 - Combo Offer: three paid admissions plus one included admission, for four independently scannable tickets at ₹447 before applicable taxes.
 
-Event capacity is consumed per admission/ticket, so a combo consumes four places. The buyer/contact may be shared by the order; whether a separate attendee name is required for each ticket is unresolved.
+Event capacity is consumed per admission/ticket, so a combo consumes four places. The buyer/contact may be shared by the order. A combo registration requires all four attendee names: the buyer's name is the first attendee name, and three additional attendee names are required. Buyer email and phone are collected once and shared across the order. Each generated ticket carries its own attendee name.
 
 ---
 
@@ -181,9 +181,9 @@ ISSUED -> CANCELLED  through authorized cancellation
 
 # 9. Payment and Tax
 
-The displayed ticket offer prices are in INR: ₹149 for one admission and ₹447 before applicable taxes for the four-admission combo. Payment provider, payment confirmation workflow, tax applicability/rate/calculation, and whether production tickets may be issued before payment are not yet finalized.
+The displayed ticket offer prices are in INR: ₹149 for one admission and ₹447 before applicable taxes for the four-admission combo. The application integrates Razorpay TEST/SANDBOX orders with persisted idempotency and backend verification. Online tickets are issued only after the provider confirms a captured payment with matching order, amount, and currency. Payment/order state, registration state, and each ticket's admission state are distinct.
 
-Registration/order state, ticket state, and payment state are separate concepts. Registration creation must not be presented as successful payment. Do not integrate a payment provider, create fake payment records, mark orders paid, or calculate taxes until those requirements are approved. Payment-gated ticket issuance/activation remains unresolved.
+Live Razorpay verification and settlement are deferred pending organization merchant/bank credentials. Tax applicability and calculation remain undefined. Sandbox validation is not production-readiness evidence.
 
 ---
 
@@ -197,8 +197,8 @@ The canonical production Dhandiya Night 2026 event identity is UUID `8b3f7a20-6e
 
 # 11. Unresolved Product Decisions
 
-- Whether each ticket must be assigned an individual attendee name and what attendee information is collected per ticket.
-- Whether payment is required before registration acceptance and ticket issuance/activation; payment provider, payment methods, confirmation, refunds, and payment-status values.
+- Live payment configuration, trusted webhook policy, and settlement behavior. Refunds and settlement reversals are not supported by the application.
+- Whether an event-level payment-required setting is needed for future events.
 - Tax applicability and calculation for single and combo offers.
-- Whole-order cancellation and combo cancellation/refund rules, particularly if any ticket has already been used.
+- Whole-order cancellation and combo cancellation rules, particularly if any ticket has already been used.
 - Whether administrators need a non-blocking duplicate-registration warning/report and its matching criteria.

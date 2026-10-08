@@ -84,9 +84,13 @@ The primary entities are:
 User
 Event
 TicketTier
+PaymentIntent
+Payment
 Registration
+RegistrationIdempotency
 Ticket
 TicketScan
+TicketDelivery
 AuditLog
 ```
 
@@ -146,7 +150,7 @@ admission_count
 availability
 ```
 
-For Dhandiya Night, prices are INR 149 for one admission and INR 447 before applicable taxes for a four-admission combo. No tax amount or payment record is stored until the payment/tax workflow is approved. `admission_count` describes the admissions issued for one selected offer; capacity is consumed for each resulting ticket.
+For Dhandiya Night, prices are INR 149 for one admission and INR 447 before applicable taxes for a four-admission combo. Payment amounts are persisted in minor currency units from the selected offer; no tax amount is currently calculated or stored. `admission_count` describes the admissions issued for one selected offer; capacity is reserved while a payment order is pending and consumed for each resulting ticket.
 
 ---
 
@@ -167,7 +171,7 @@ created_at
 updated_at
 ```
 
-Buyer/contact information belongs to the registration and must not be redundantly copied onto every ticket. Any ticket-specific attendee identity fields remain subject to the product decision recorded in `docs/PRODUCT_DECISIONS.md`.
+Buyer/contact information belongs to the registration and must not be redundantly copied onto every ticket. Each ticket stores its own required attendee name; for a combo, four attendee names are required, with the first name also serving as the buyer name. Buyer email and phone remain stored once on the registration.
 
 Registration source must distinguish:
 
@@ -177,6 +181,22 @@ ON_SPOT
 ```
 
 Both registration types must use the same registration/ticket architecture.
+
+## RegistrationIdempotency
+Stores one idempotency key and normalized request fingerprint for a registration operation, with a one-to-one link to the resulting registration. The UUID key is the primary key, so the database arbitrates concurrent duplicate submissions. The key record, registration, tickets, and registration audit record are committed atomically; a failed transaction leaves no incomplete key record or partial ticket set.
+
+The registration model does not impose uniqueness on buyer email or phone. A different idempotency key represents a separate attempt, even when contact details match.
+
+---
+
+## PaymentIntent
+Stores an idempotent online registration/payment attempt, normalized request fingerprint, buyer and attendee details, pending capacity reservation, and an optional link to the verified registration. The UUID idempotency key is the primary key. A captured payment whose ticket issuance needs investigation moves the intent to `REVIEW_REQUIRED`.
+
+## Payment
+Stores each Razorpay order/payment attempt, amount, currency, lifecycle status, verification status, capture time, ticket-issuance status, expiry, and failure/verification metadata. Razorpay order and payment IDs are unique. A conditional database uniqueness constraint permits at most one verified captured payment per payment intent. Client-reported failure metadata is informational and cannot mark an order failed or associate an unverified payment ID. Captured payments whose tickets were not issued or whose registration is incomplete are retained and reported for administrator review; the application has no refund or settlement-reversal operation.
+
+## TicketDelivery
+Stores retryable email/PDF delivery state for a registration, including recipient, attempt count, last error, and sent time. It is one-to-one with the registration and does not control ticket validity.
 
 ---
 
@@ -256,9 +276,13 @@ The primary relationship structure is:
 ```text
 Event
   ├──< TicketTier
+  ├──< PaymentIntent
+  │       └──< Payment
   └──< Registration (order)
+          ├── RegistrationIdempotency (optional 1:1)
           └──< Ticket
                   └──< TicketScan
+          └── TicketDelivery (optional 1:1)
 ```
 
 Conceptually:
@@ -991,7 +1015,7 @@ The database should preserve the relationship between the attendee registration 
 ---
 
 # 39. Ticket Cancellation
-Cancellation is handled through controlled application logic. `ISSUED -> CANCELLED` is the only cancellation transition. `USED` tickets remain historically `USED`; they must never be reset to `ISSUED` or relabelled `CANCELLED`. A cancelled ticket is independently invalidated and does not cancel any other tickets in its registration/order. Whole-order cancellation and cancellation/refund behavior for combo tickets containing used admissions remain unresolved; see `docs/PRODUCT_DECISIONS.md`.
+Cancellation is handled through controlled application logic. `ISSUED -> CANCELLED` is the only cancellation transition. `USED` tickets remain historically `USED`; they must never be reset to `ISSUED` or relabelled `CANCELLED`. A cancelled ticket is independently invalidated and does not cancel any other tickets in its registration/order. Whole-order and combo cancellation behavior for tickets containing used admissions remains unresolved; the application does not support or initiate refunds. See `docs/PRODUCT_DECISIONS.md`.
 
 ---
 
@@ -1166,3 +1190,24 @@ Database Constraints
 ```
 
 Critical ticketing rules must remain correct even when requests arrive concurrently or when the client behaves incorrectly.
+
+---
+
+# 48. Ticket Email Queue and Quota
+
+`TicketDelivery` has a one-to-one relationship with `Ticket`; this ensures a
+combo registration produces an independent email and PDF for each attendee.
+The migration converts historical registration-level delivery rows to
+ticket-level rows and preserves sent states.
+
+`EmailDailyUsage` is keyed by local calendar date. Its database check
+constraints cap regular reservations at 295 and staff/complimentary
+reservations at 5. Workers lock the daily usage row before claiming a pending
+delivery and increment the corresponding reservation in the same transaction.
+Provider acceptance increments the sent count; definite rejection releases
+the reservation. Daily reservations cannot be borrowed across priority classes.
+
+A timeout or provider 5xx may mean Brevo accepted the message even though the
+application did not receive confirmation. Such deliveries intentionally keep
+their reservation and `SENDING` state until reconciled, preventing an automatic
+retry from creating duplicate emails.

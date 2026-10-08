@@ -1,4 +1,11 @@
 Django>=5.2,<5.3
+django-cors-headers>=4.7,<5
 djangorestframework>=3.16,<3.17
+gunicorn>=23,<24
+setuptools>=70,<81
 psycopg[binary]>=3.2,<4
 python-dotenv>=1.0,<2
+requests>=2.32,<3
+razorpay>=1.4,<2
+reportlab>=4,<5
+whitenoise>=6.9,<7

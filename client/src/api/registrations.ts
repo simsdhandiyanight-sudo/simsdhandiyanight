@@ -15,6 +15,63 @@ export interface RegistrationFilters {
   search?: string;
 }
 
+export interface RegistrationCreateParams {
+  eventId: string;
+  attendee: {
+    fullName: string;
+    email: string;
+    phone: string;
+    organization?: string;
+    jobTitle?: string;
+  };
+  attendeeNames?: string[];
+  tierId: string;
+  source: 'ONLINE' | 'ON_SPOT';
+}
+
+export const registrationRequest = (params: RegistrationCreateParams) => {
+  const buyer = {
+    name: params.attendee.fullName.trim(),
+    email: params.attendee.email.trim().toLowerCase(),
+    phone: params.attendee.phone,
+    organization: params.attendee.organization?.trim() || '',
+    job_title: params.attendee.jobTitle?.trim() || '',
+  };
+  return {
+    event_id: params.eventId,
+    ticket_tier_id: params.tierId,
+    buyer,
+    attendee_names: (params.attendeeNames || [buyer.name]).map((name) => name.trim()),
+  };
+};
+
+export const registrationIdempotencyKey = async (params: RegistrationCreateParams): Promise<string> => {
+  const request = registrationRequest(params);
+  const fingerprint = await requestFingerprint({
+    ...request,
+    source: params.source,
+  });
+  const storageKey = `ticketing.registration-idempotency.${fingerprint}`;
+  const idempotencyKey = sessionStorage.getItem(storageKey) || crypto.randomUUID();
+  sessionStorage.setItem(storageKey, idempotencyKey);
+  return idempotencyKey;
+};
+
+export const clearRegistrationIdempotencyKey = async (params: RegistrationCreateParams): Promise<void> => {
+  const request = registrationRequest(params);
+  const fingerprint = await requestFingerprint({
+    ...request,
+    source: params.source,
+  });
+  sessionStorage.removeItem(`ticketing.registration-idempotency.${fingerprint}`);
+};
+
+const requestFingerprint = async (value: unknown): Promise<string> => {
+  const bytes = new TextEncoder().encode(JSON.stringify(value));
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+};
+
 const queryString = (filters: RegistrationFilters): string => {
   const query = new URLSearchParams();
   query.set('page_size', '50');
@@ -45,31 +102,21 @@ export const registrationsApi = {
 
   create: async (params: {
     eventId: string;
-    attendee: {
-      fullName: string;
-      email: string;
-      phone: string;
-      organization?: string;
-      jobTitle?: string;
-    };
+    attendee: RegistrationCreateParams['attendee'];
+    attendeeNames?: string[];
     tierId: string;
     source: 'ONLINE' | 'ON_SPOT';
   }): Promise<{ registration: Registration; ticket: Ticket; tickets: Ticket[] }> => {
     const endpoint = params.source === 'ON_SPOT' ? '/registrations/on-spot/' : '/registrations/';
+    const request = registrationRequest(params);
+    const idempotencyKey = await registrationIdempotencyKey(params);
+
     const response = await apiRequest<RegistrationCreateResponse>(endpoint, {
       method: 'POST',
-      body: jsonBody({
-        event_id: params.eventId,
-        ticket_tier_id: params.tierId,
-        buyer: {
-          name: params.attendee.fullName,
-          email: params.attendee.email,
-          phone: params.attendee.phone,
-          organization: params.attendee.organization || '',
-          job_title: params.attendee.jobTitle || '',
-        },
-      }),
+      headers: { 'Idempotency-Key': idempotencyKey },
+      body: jsonBody(request),
     });
+    await clearRegistrationIdempotencyKey(params);
     const tickets = response.tickets.map(mapTicket);
     return {
       registration: mapRegistration(response.registration),

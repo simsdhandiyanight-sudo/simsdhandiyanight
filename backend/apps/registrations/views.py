@@ -3,6 +3,7 @@ from django.shortcuts import get_object_or_404
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_protect
 from rest_framework import serializers, status
+from rest_framework.exceptions import APIException
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle
@@ -17,7 +18,27 @@ from .serializers import (
     RegistrationListSerializer,
     RegistrationSerializer,
 )
-from .services import create_registration
+from .services import create_registration_idempotently
+
+
+class PaymentRequired(APIException):
+    status_code = status.HTTP_402_PAYMENT_REQUIRED
+    default_detail = "Online tickets are issued only after backend payment verification."
+    default_code = "PAYMENT_REQUIRED"
+
+
+def get_idempotency_key(request):
+    raw_key = request.headers.get("Idempotency-Key")
+    if not raw_key:
+        raise serializers.ValidationError(
+            {"Idempotency-Key": "This header is required."}
+        )
+    try:
+        return serializers.UUIDField().run_validation(raw_key)
+    except serializers.ValidationError as error:
+        raise serializers.ValidationError(
+            {"Idempotency-Key": "Provide a valid UUID."}
+        ) from error
 
 
 class RegistrationListCreateView(APIView):
@@ -31,15 +52,7 @@ class RegistrationListCreateView(APIView):
 
     @method_decorator(csrf_protect)
     def post(self, request):
-        serializer = CreateRegistrationSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        registration, _tickets = create_registration(
-            event_id=serializer.validated_data["event_id"],
-            tier_id=serializer.validated_data["ticket_tier_id"],
-            buyer=serializer.validated_data["buyer"],
-            source=Registration.Source.ONLINE,
-        )
-        return self._created_response(registration)
+        raise PaymentRequired()
 
     def get(self, request):
         if request.user.role not in ("ADMIN", "REGISTRATION_STAFF"):
@@ -82,14 +95,19 @@ class RegistrationListCreateView(APIView):
     def get_paginated_response(self, data):
         return self.paginator.get_paginated_response(data)
 
-    def _created_response(self, registration):
+    def _created_response(self, registration, *, created=True):
         registration = (
             Registration.objects.select_related("event", "ticket_tier")
             .prefetch_related(Prefetch("tickets", queryset=Ticket.objects.select_related("registration__event", "registration__ticket_tier")))
             .get(pk=registration.pk)
         )
         data = RegistrationSerializer(registration).data
-        return Response({"registration": data, "ticket": data["tickets"][0], "tickets": data["tickets"]}, status=status.HTTP_201_CREATED)
+        response = Response(
+            {"registration": data, "ticket": data["tickets"][0], "tickets": data["tickets"]},
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+        response["Idempotency-Replayed"] = "false" if created else "true"
+        return response
 
 
 class OnSpotRegistrationView(APIView):
@@ -99,15 +117,17 @@ class OnSpotRegistrationView(APIView):
     def post(self, request):
         serializer = CreateRegistrationSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        registration, _tickets = create_registration(
+        registration, _tickets, created = create_registration_idempotently(
+            idempotency_key=get_idempotency_key(request),
             event_id=serializer.validated_data["event_id"],
             tier_id=serializer.validated_data["ticket_tier_id"],
             buyer=serializer.validated_data["buyer"],
             source=Registration.Source.ON_SPOT,
             created_by=request.user,
+            attendee_names=serializer.validated_data.get("attendee_names"),
         )
         response_view = RegistrationListCreateView()
-        return response_view._created_response(registration)
+        return response_view._created_response(registration, created=created)
 
 
 class RegistrationDetailView(APIView):

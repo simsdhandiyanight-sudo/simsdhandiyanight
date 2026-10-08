@@ -8,7 +8,11 @@ export const INITIAL_EVENTS: EventItem[] = [
     slug: 'dhandiya-night-2026',
     name: 'Dhandiya Night 2026',
     tagline: 'Dance · Dandiya · Dhamaka',
-    description: 'Celebrate the vibrant spirit of Navratri through Dandiya, a joyful celebration of music, dance, and togetherness. Get ready for an evening filled with rhythm, colours, energy, and festive vibes. Dance to lively beats and celebrate the season with friends, family, and loved ones. Put on your festive best and make memories that last beyond the night. Join us on 16th October and let the celebration begin.',
+    description: `Celebrate the vibrant spirit of Navratri through Dandiya, a joyful celebration of music, dance, and togetherness.
+Get ready for an evening filled with rhythm, colours, energy, and festive vibes.
+Dance to lively beats and celebrate the season with friends, family, and loved ones.
+Put on your festive best and make memories that last beyond the night.
+Join us on 16th October and let the celebration begin`,
     category: 'music',
     date: '2026-10-16',
     formattedDate: '16th October 2026',

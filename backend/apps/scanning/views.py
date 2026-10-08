@@ -108,6 +108,7 @@ class ScanListCreateView(APIView):
             scans = scans.filter(
                 Q(ticket__id__icontains=search)
                 | Q(ticket__registration__buyer_name__icontains=search)
+                | Q(ticket__attendee_name__icontains=search)
                 | Q(gate__name__icontains=search)
                 | Q(scanned_by__name__icontains=search)
             )
@@ -266,6 +267,7 @@ class ManifestExportView(APIView):
                 (
                     "Registration ID",
                     "Ticket ID",
+                    "Attendee Name",
                     "Buyer Name",
                     "Email",
                     "Phone",
@@ -283,6 +285,7 @@ class ManifestExportView(APIView):
                     (
                         registration.id,
                         ticket.id,
+                        ticket.attendee_name or registration.buyer_name,
                         registration.buyer_name,
                         registration.buyer_email,
                         registration.buyer_phone,

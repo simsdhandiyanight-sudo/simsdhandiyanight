@@ -179,6 +179,7 @@ export const StaffDashboardPage: React.FC = () => {
 
       {/* Main Content */}
       <main className="flex-1 p-4 sm:p-8 max-w-7xl mx-auto w-full space-y-8">
+        {dashboardError && <div role="alert" className="rounded-xl border border-rose-900/60 bg-rose-950/30 px-4 py-3 text-xs leading-relaxed text-rose-200">{dashboardError}</div>}
         <div className="rounded-xl border border-amber-900/60 bg-amber-950/30 px-4 py-3 text-xs leading-relaxed text-amber-200/90">
           Dashboard counts and scan activity are loaded from the ticketing service.
         </div>

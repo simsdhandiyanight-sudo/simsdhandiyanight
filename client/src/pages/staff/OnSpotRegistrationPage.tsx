@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { eventsApi, FEATURED_EVENT_SLUG } from '../../api/events';
 import { registrationsApi } from '../../api/registrations';
@@ -39,12 +39,15 @@ export const OnSpotRegistrationPage: React.FC = () => {
   const [email, setEmail] = useState('');
   const [organization, setOrganization] = useState('');
   const [tierId, setTierId] = useState('');
+  const [attendeeNames, setAttendeeNames] = useState<string[]>([]);
   const [errorMessage, setErrorMessage] = useState('');
 
   // Result state
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [generatedTicket, setGeneratedTicket] = useState<Ticket | null>(null);
+  const [generatedTickets, setGeneratedTickets] = useState<Ticket[]>([]);
+  const submittingRef = useRef(false);
   const [showFullPass, setShowFullPass] = useState(false);
+  const selectedTier = activeEvent?.tiers.find((tier) => tier.id === tierId);
   const eventUnavailableMessage = eventLoadError || (loadingEvent
     ? 'Loading event details…'
     : !activeEvent
@@ -59,7 +62,16 @@ export const OnSpotRegistrationPage: React.FC = () => {
 
   const handleRegisterOnSpot = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submittingRef.current) return;
     if (!activeEvent || !tierId || !name.trim()) return;
+    const names = selectedTier?.admissionCount === 4
+      ? [name.trim(), ...attendeeNames.slice(0, 3).map((attendeeName) => attendeeName.trim())]
+      : [name.trim()];
+    if (names.some((attendeeName) => !attendeeName)) {
+      setErrorMessage('Enter a name for each of the four combo tickets.');
+      return;
+    }
+    submittingRef.current = true;
     setIsSubmitting(true);
     setErrorMessage('');
     try {
@@ -71,13 +83,15 @@ export const OnSpotRegistrationPage: React.FC = () => {
           phone: phone.trim(),
           organization: organization.trim() || undefined,
         },
+        attendeeNames: selectedTier?.admissionCount === 4 ? names : undefined,
         tierId,
         source: 'ON_SPOT',
       });
-      setGeneratedTicket(result.ticket);
+      setGeneratedTickets(result.tickets);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Registration failed. Please try again.');
     } finally {
+      submittingRef.current = false;
       setIsSubmitting(false);
     }
   };
@@ -87,8 +101,9 @@ export const OnSpotRegistrationPage: React.FC = () => {
     setPhone('');
     setEmail('');
     setOrganization('');
-    setGeneratedTicket(null);
+    setGeneratedTickets([]);
     setShowFullPass(false);
+    setAttendeeNames([]);
   };
 
   return (
@@ -123,7 +138,7 @@ export const OnSpotRegistrationPage: React.FC = () => {
 
       {/* Main Container */}
       <main className="flex-1 p-4 sm:p-8 max-w-2xl mx-auto w-full flex flex-col justify-center">
-        {!generatedTicket ? (
+        {generatedTickets.length === 0 ? (
           /* Operational Fast Form */
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
             <div className="flex items-start justify-between">
@@ -228,7 +243,10 @@ export const OnSpotRegistrationPage: React.FC = () => {
                   </label>
                   <select
                     value={tierId}
-                    onChange={(e) => setTierId(e.target.value)}
+                    onChange={(e) => {
+                      setTierId(e.target.value);
+                      setAttendeeNames([]);
+                    }}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
                   >
                     {activeEvent?.tiers.map((t) => (
@@ -239,6 +257,39 @@ export const OnSpotRegistrationPage: React.FC = () => {
                   </select>
                 </div>
               </div>
+
+              {selectedTier?.admissionCount === 4 && (
+                <fieldset className="space-y-3 rounded-xl border border-slate-800 p-4">
+                  <legend className="px-2 text-xs font-semibold text-slate-200">Names for all four combo tickets</legend>
+                  <p className="text-[11px] text-slate-400">The buyer's email and mobile number are shared across the tickets.</p>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-1 block text-[11px] font-semibold text-slate-300">Attendee 1 name</label>
+                      <p className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-white">{name || 'Enter the name above'}</p>
+                    </div>
+                    {Array.from({ length: 3 }, (_, index) => (
+                      <div key={index}>
+                        <label htmlFor={`onsite-attendee-${index + 2}`} className="mb-1 block text-[11px] font-semibold text-slate-300">
+                          Attendee {index + 2} name *
+                        </label>
+                        <input
+                          id={`onsite-attendee-${index + 2}`}
+                          type="text"
+                          required
+                          maxLength={80}
+                          value={attendeeNames[index] ?? ''}
+                          onChange={(e) => {
+                            const nextNames = [...attendeeNames];
+                            nextNames[index] = e.target.value;
+                            setAttendeeNames(nextNames);
+                          }}
+                          className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </fieldset>
+              )}
 
               <div className="pt-2">
                 <button
@@ -288,12 +339,18 @@ export const OnSpotRegistrationPage: React.FC = () => {
             <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4 text-left space-y-2">
               <div className="flex justify-between items-center pb-2 border-b border-slate-800 text-xs">
                 <span className="text-slate-400 uppercase font-semibold">ATTENDEE</span>
-                <span className="font-bold text-white text-sm">{generatedTicket.attendeeName}</span>
+                <span className="font-bold text-white text-sm">{generatedTickets.length === 1 ? generatedTickets[0].attendeeName : `${generatedTickets.length} attendees`}</span>
               </div>
-              <div className="flex justify-between items-center text-xs">
+              {generatedTickets.map((ticket, index) => (
+                <div key={ticket.id} className="flex justify-between items-center text-xs">
+                  <span className="text-slate-400">Ticket {index + 1} · {ticket.attendeeName}</span>
+                  <span className="font-mono font-bold text-indigo-400">{ticket.id}</span>
+                </div>
+              ))}
+              {generatedTickets.length === 1 && <div className="flex justify-between items-center text-xs">
                 <span className="text-slate-400 uppercase font-semibold">TICKET ID</span>
-                <span className="font-mono font-bold text-indigo-400">{generatedTicket.id}</span>
-              </div>
+                <span className="font-mono font-bold text-indigo-400">{generatedTickets[0].id}</span>
+              </div>}
               <div className="flex justify-between items-center text-xs">
                 <span className="text-slate-400 uppercase font-semibold">SOURCE</span>
                 <span className="font-mono text-emerald-400">ON_SPOT (DESK)</span>
@@ -302,8 +359,13 @@ export const OnSpotRegistrationPage: React.FC = () => {
 
             {/* If user expands full pass modal */}
             {showFullPass && (
-              <div className="pt-4 border-t border-slate-800">
-                <DigitalTicket ticket={generatedTicket} showActions={false} />
+              <div className="space-y-5 border-t border-slate-800 pt-4">
+                {generatedTickets.map((ticket, index) => (
+                  <section key={ticket.id} aria-label={`Ticket ${index + 1} of ${generatedTickets.length}`}>
+                    {generatedTickets.length > 1 && <h3 className="mb-2 text-center text-xs font-semibold text-slate-300">Ticket {index + 1}</h3>}
+                    <DigitalTicket ticket={ticket} showActions={false} />
+                  </section>
+                ))}
               </div>
             )}
 

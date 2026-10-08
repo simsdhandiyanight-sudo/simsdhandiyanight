@@ -12,6 +12,8 @@ import {
   ExternalLink,
   ChevronRight,
   LogOut,
+  Mail,
+  CreditCard,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
@@ -48,6 +50,8 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
     { label: 'Tickets', href: '/admin/tickets', icon: Ticket },
     { label: 'Scan History', href: '/admin/scans', icon: ScanLine },
     { label: 'Analytics & Reports', href: '/admin/reports', icon: BarChart3 },
+    { label: 'Email Delivery', href: '/admin/email-delivery', icon: Mail },
+    { label: 'Payment Review', href: '/admin/payment-review', icon: CreditCard },
   ];
 
   return (

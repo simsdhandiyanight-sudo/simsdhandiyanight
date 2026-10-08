@@ -52,6 +52,10 @@ class PublicEventSerializer(serializers.ModelSerializer):
             "venue",
             "city",
             "address",
+            "reporting_time",
+            "location_url",
+            "rules_and_regulations",
+            "instructions",
             "status",
             "capacity",
             "registeredCount",
@@ -97,6 +101,14 @@ class PublicEventSerializer(serializers.ModelSerializer):
 
 class AdminEventSerializer(serializers.ModelSerializer):
     slug = serializers.SlugField(max_length=120)
+    rules_and_regulations = serializers.ListField(
+        child=serializers.CharField(),
+        required=False,
+    )
+    instructions = serializers.ListField(
+        child=serializers.CharField(),
+        required=False,
+    )
 
     class Meta:
         model = Event
@@ -111,6 +123,10 @@ class AdminEventSerializer(serializers.ModelSerializer):
             "venue",
             "city",
             "address",
+            "reporting_time",
+            "location_url",
+            "rules_and_regulations",
+            "instructions",
             "status",
             "registration_open",
             "capacity",

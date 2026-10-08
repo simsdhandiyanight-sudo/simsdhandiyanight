@@ -36,3 +36,19 @@ class Registration(models.Model):
 
     def __str__(self):
         return f"Registration {self.id}"
+
+
+class RegistrationIdempotency(models.Model):
+    key = models.UUIDField(primary_key=True, editable=False)
+    request_hash = models.CharField(max_length=64)
+    registration = models.OneToOneField(
+        Registration,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="idempotency_record",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return str(self.key)

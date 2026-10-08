@@ -9,13 +9,14 @@ This document records decisions needed to move the current Dhandiya Night demo t
 - A `Registration` is the buyer's order/registration record. It belongs to one event and holds the buyer/contact details, registration source, and the selected ticket offer.
 - One registration can contain one or more `Ticket` records. The relationship is one-to-many: `Registration 1 -> Ticket 1..N`.
 - The buyer/contact details are stored once on the registration; they are not copied to every ticket.
+- Every combo registration requires the name of each of its four attendees. The existing buyer name is the first attendee's name; three additional attendee names are collected. Buyer email and phone are collected once and shared across the order.
+- Each ticket stores its own attendee name so its QR credential and gate scan identify the specific attendee. Ticket names do not duplicate buyer email or phone.
 - Every ticket is an independent admission credential with its own stable ID, unique opaque QR token, status, and scan history. Tickets in the same order can be scanned independently.
 - Capacity is measured in admissions/tickets, not orders. A combo consumes four admissions.
 - One registration submission selects one ticket offer, consistent with the current registration UI. A single-ticket order contains one ticket; a combo order contains four.
 
 **UNRESOLVED**
 
-- Whether the buyer must provide a separate attendee name for every ticket, or whether tickets may initially be issued to bearer attendees without individual names.
 
 ## 2. Combo ticket behavior
 
@@ -25,11 +26,12 @@ This document records decisions needed to move the current Dhandiya Night demo t
 - The combo covers four admissions: three paid admissions and one included free admission. One buyer/contact may purchase/register the combo; the backend creates four independently scannable tickets under that registration.
 - The combo consumes four units of event admission capacity. The offer itself is one purchasable package; package availability and admission capacity are distinct quantities.
 - The buyer's registration is not a substitute for the four ticket credentials. Entry is validated per ticket.
+- Combo registration is blocked unless all four attendee names are supplied; buyer email and phone remain single shared contact fields.
 
 **UNRESOLVED**
 
 - Whether taxes apply to the three paid admissions, the full combo amount, or another taxable base. No tax rate or tax calculation is defined.
-- How partial cancellation/refund of a combo should affect its included tickets, package availability, or any future payment.
+- How partial cancellation of a combo should affect its included tickets or package availability.
 
 ## 3. Duplicate registration policy
 
@@ -61,17 +63,19 @@ This document records decisions needed to move the current Dhandiya Night demo t
 **DECIDED**
 
 - The ticket-offer prices currently specified in the product UI are ₹149 for one admission and ₹447 for the four-admission combo, before applicable taxes; the currency is INR.
-- These configured prices are offer information only until a payment workflow is approved and integrated. Registration creation must not be represented as payment success.
-- Do not integrate a payment provider, create fabricated payment records, infer a `PAID` state, or calculate/display a tax amount without an approved provider, tax treatment, and rate.
-- Registration/order state, ticket state, and payment state are separate concepts. Tickets remain independently scannable regardless of the buyer/order's payment metadata; production ticket issuance/activation must respect the payment rule once it is decided.
-- A future payment integration must attach payment records/status to the registration/order and must not require redesigning the one-to-many ticket model.
+- The Razorpay TEST/SANDBOX integration persists payment intents and payment attempts. Online tickets are issued only after backend signature and provider verification confirms a captured payment matching the order amount and currency.
+- Payment state, registration state, and individual ticket state are separate concepts. A browser callback cannot establish payment success or failure; ticket creation requires backend payment verification.
+- A verified payment creates one registration, the corresponding tickets and QR tokens, and a retryable backend PDF/email delivery record.
+- Payment verification is the only financial action supported by the application. Refunds and settlement reversals are not supported, and the application must never initiate them.
+- If a provider-confirmed captured payment cannot be matched or its tickets cannot be issued, preserve the captured payment and audit details, mark it `ADMIN_REVIEW_REQUIRED`, and expose it to administrators for manual handling outside the application. Do not issue an automatic refund.
+- Live-mode verification and settlement are deferred until organization merchant/bank credentials are available. Test-mode validation does not establish production readiness.
+- No tax amount is calculated or displayed because the tax treatment and rate remain undecided.
 
 **UNRESOLVED**
 
-- Whether payment is required before a production registration is accepted and tickets are issued/activated, and which non-paid states are needed.
-- Payment provider, payment methods, payment confirmation/webhook rules, refunds, and settlement behavior.
+- Production payment methods, trusted webhook policy, and settlement behavior.
 - Tax applicability, taxable base, rate, rounding, and receipt/invoice requirements.
-- Whether an event-level `payment_required` setting is needed. The product is not declared free; the displayed prices do not by themselves define the production payment workflow.
+- Whether an event-level `payment_required` setting is needed for future free or differently-priced events.
 
 ## 6. Legacy demo-data policy
 
@@ -92,10 +96,9 @@ This document records decisions needed to move the current Dhandiya Night demo t
 
 ## 8. Remaining decisions before production payment/ticket activation
 
-The unresolved items above require product-owner decisions before implementing payment-dependent production behavior:
+The unresolved items above require product-owner and organization decisions before live payment processing or production release:
 
-1. Whether and when payment is required before ticket issuance or activation.
+1. Live Razorpay merchant/bank credentials, provider configuration, verification, and settlement.
 2. Tax handling for the single and combo offers.
-3. Attendee identity fields per ticket.
-4. Whole-order cancellation/refund behavior, including combos containing already-used tickets.
+3. Whole-order cancellation behavior, including combos containing already-used tickets. Refunds remain unsupported.
 5. Whether to show advisory duplicate-registration warnings.

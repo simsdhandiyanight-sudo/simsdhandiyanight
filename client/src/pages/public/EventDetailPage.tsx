@@ -1,11 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { eventsApi } from '../../api/events';
+import { eventsApi, FEATURED_EVENT_SLUG } from '../../api/events';
 import { EventItem } from '../../types';
 import { Navbar } from '../../components/common/Navbar';
 import { Footer } from '../../components/common/Footer';
 import { FestivalMotifs } from '../../components/common/FestivalMotifs';
-import { FEATURED_EVENT_SLUG } from '../../api/events';
 import { FestivalPoster } from '../../components/common/FestivalPoster';
 import {
   Calendar,
@@ -165,9 +164,11 @@ export const EventDetailPage: React.FC = () => {
                 <h2 className="text-2xl font-display font-bold text-white tracking-tight">
                   About This Event
                 </h2>
-                <p className="text-sm sm:text-base text-slate-300 leading-relaxed">
-                  {event.description}
-                </p>
+                <div className="space-y-3 text-sm sm:text-base text-slate-300 leading-relaxed">
+                  {event.description.split(/\r?\n/).map((paragraph, index) => (
+                    <p key={index}>{paragraph}</p>
+                  ))}
+                </div>
                 <div className="p-4 bg-slate-900 border border-slate-800 rounded-2xl flex items-start gap-3 text-xs text-slate-300">
                   <MapPin className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
                   <div>

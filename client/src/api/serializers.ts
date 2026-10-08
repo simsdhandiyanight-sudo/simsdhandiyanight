@@ -15,6 +15,7 @@ export interface ApiTicket {
   event_id: string;
   event_name: string;
   buyer_name: string;
+  attendee_name?: string | null;
   attendee_email?: string | null;
   attendee_phone?: string | null;
   tier_name: string;
@@ -81,7 +82,7 @@ export const mapTicket = (ticket: ApiTicket): Ticket => ({
   registrationId: ticket.registration_id,
   eventId: ticket.event_id,
   eventName: ticket.event_name,
-  attendeeName: ticket.buyer_name,
+  attendeeName: ticket.attendee_name || ticket.buyer_name,
   attendeeEmail: ticket.attendee_email ?? undefined,
   attendeePhone: ticket.attendee_phone ?? undefined,
   tierName: ticket.tier_name,

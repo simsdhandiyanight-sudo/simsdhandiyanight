@@ -42,6 +42,7 @@ const highlights = [
 export const LandingPage: React.FC = () => {
   const [event, setEvent] = useState<EventItem | null>(null);
   const [eventError, setEventError] = useState('');
+  const [eventLoading, setEventLoading] = useState(true);
   const heroRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
@@ -49,11 +50,13 @@ export const LandingPage: React.FC = () => {
     eventsApi.getById(FEATURED_EVENT_SLUG).then((loadedEvent) => {
       if (!cancelled) {
         setEvent(loadedEvent);
+        setEventLoading(false);
         if (!loadedEvent) setEventError('Dhandiya Night event details are currently unavailable.');
       }
     }).catch((error: unknown) => {
       if (!cancelled) {
         setEventError(error instanceof Error ? error.message : 'Unable to load event details. Please try again.');
+        setEventLoading(false);
       }
     });
     return () => { cancelled = true; };
@@ -134,6 +137,7 @@ export const LandingPage: React.FC = () => {
                 <span><small>VENUE</small><strong>Soundarya College Campus</strong></span>
               </div>
             </div>
+            {eventLoading && <p role="status" className="mt-3 text-sm text-slate-300 flex items-center gap-2"><span className="w-4 h-4 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />Loading event details…</p>}
             {eventError && <p role="alert" className="mt-3 text-sm text-rose-300">{eventError}</p>}
             <p className="festival-home-invitation__tagline">Dance <i>•</i> Dandiya <i>•</i> Dhamaka</p>
             <div className="festival-home-invitation__actions">

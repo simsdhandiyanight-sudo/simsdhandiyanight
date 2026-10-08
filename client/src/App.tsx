@@ -30,6 +30,8 @@ import { AdminRegistrationsPage } from './pages/admin/AdminRegistrationsPage';
 import { AdminTicketsPage } from './pages/admin/AdminTicketsPage';
 import { AdminScansPage } from './pages/admin/AdminScansPage';
 import { AdminReportsPage } from './pages/admin/AdminReportsPage';
+import AdminEmailDeliveryPage from './pages/admin/AdminEmailDeliveryPage';
+import AdminPaymentReviewPage from './pages/admin/AdminPaymentReviewPage';
 
 const ProtectedRoute: React.FC<{
   allowedRoles: StaffUser['role'][];
@@ -81,6 +83,8 @@ export default function App() {
           <Route path="/admin/tickets" element={<ProtectedRoute allowedRoles={['ADMIN']}><AdminTicketsPage /></ProtectedRoute>} />
           <Route path="/admin/scans" element={<ProtectedRoute allowedRoles={['ADMIN']}><AdminScansPage /></ProtectedRoute>} />
           <Route path="/admin/reports" element={<ProtectedRoute allowedRoles={['ADMIN']}><AdminReportsPage /></ProtectedRoute>} />
+          <Route path="/admin/email-delivery" element={<ProtectedRoute allowedRoles={['ADMIN']}><AdminEmailDeliveryPage /></ProtectedRoute>} />
+          <Route path="/admin/payment-review" element={<ProtectedRoute allowedRoles={['ADMIN']}><AdminPaymentReviewPage /></ProtectedRoute>} />
           <Route path="/admin/users" element={<ProtectedRoute allowedRoles={['ADMIN']}><Navigate to="/admin" replace /></ProtectedRoute>} />
 
           {/* Fallback */}

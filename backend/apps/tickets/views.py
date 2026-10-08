@@ -1,4 +1,5 @@
 from django.db.models import Prefetch, Q
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_protect
@@ -9,6 +10,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsAdministrator
+from apps.registrations.models import Registration
 from apps.scanning.models import TicketScan
 from .models import Ticket
 from .serializers import TicketSerializer
@@ -54,6 +56,7 @@ class TicketListView(APIView):
             tickets = tickets.filter(
                 Q(id__icontains=search)
                 | Q(registration__buyer_name__icontains=search)
+                | Q(attendee_name__icontains=search)
                 | Q(registration__buyer_email__icontains=search)
                 | Q(registration__buyer_phone__icontains=search)
                 | Q(registration__event__name__icontains=search)
@@ -79,6 +82,44 @@ class TicketDetailView(APIView):
     def get(self, request, ticket_id):
         ticket = get_object_or_404(ticket_queryset(), pk=ticket_id)
         return Response(TicketSerializer(ticket, context={"request": request}).data)
+
+
+class TicketPdfView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request, ticket_id):
+        ticket = get_object_or_404(ticket_queryset(), pk=ticket_id)
+        from apps.payments.pdf import generate_tickets_pdf
+
+        pdf = generate_tickets_pdf([ticket])
+        response = HttpResponse(pdf, content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="ticket-{ticket.id}.pdf"'
+        response["Cache-Control"] = "private, no-store"
+        return response
+
+
+class RegistrationTicketsPdfView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request, registration_id):
+        registration = get_object_or_404(
+            Registration.objects.select_related("event"),
+            pk=registration_id,
+        )
+        tickets = list(ticket_queryset().filter(registration=registration))
+        if not tickets:
+            from rest_framework.exceptions import NotFound
+
+            raise NotFound("This registration has no issued tickets.")
+        from apps.payments.pdf import generate_tickets_pdf
+
+        pdf = generate_tickets_pdf(tickets)
+        response = HttpResponse(pdf, content_type="application/pdf")
+        response["Content-Disposition"] = (
+            f'attachment; filename="tickets-{registration.id}.pdf"'
+        )
+        response["Cache-Control"] = "private, no-store"
+        return response
 
 
 class TicketCancelView(APIView):

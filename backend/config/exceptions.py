@@ -11,8 +11,12 @@ def api_exception_handler(exc, context):
     if response.status_code == 409:
         code = "CONFLICT"
     if isinstance(details, dict) and "detail" in details:
-        message = str(details["detail"])
+        detail = details["detail"]
+        message = str(detail)
         details = {}
+        exception_code = getattr(detail, "code", None)
+        if exception_code:
+            code = str(exception_code).upper()
     else:
         message = "Please correct the request and try again."
 

@@ -286,7 +286,7 @@ GET /api/v1/events/
 Create a resource or perform an operation that creates a server-side result.
 
 ```http
-POST /api/v1/registrations/
+POST /api/v1/payments/create-order/
 ```
 
 ```http
@@ -344,7 +344,6 @@ DELETE /events/{id}/
 Example:
 
 ```http
-POST /api/v1/registrations/
 GET  /api/v1/registrations/{registration_id}/
 ```
 
@@ -354,18 +353,26 @@ Administrative listing:
 GET /api/v1/registrations/
 ```
 
-On-spot registration should use the same registration API architecture while applying appropriate staff authorization.
+On-spot creation is staff-authorized:
 
-One registration represents one buyer/order and may return one or more tickets. Each returned ticket has its own ID and opaque QR token; a combo returns four tickets. Do not assume one registration maps to exactly one ticket.
+```http
+POST /api/v1/registrations/on-spot/
+```
+
+Public online creation uses the payment-order and verification flow in section 14; direct public `POST /api/v1/registrations/` is blocked with `402 PAYMENT_REQUIRED`. One completed registration represents one buyer/order and may return one or more tickets. Each returned ticket has its own ID, attendee name, and opaque QR token; a combo returns four tickets. For a four-admission combo, include exactly four valid `attendee_names`. The buyer name is the first attendee name, and the buyer email and phone are shared once on the registration.
 
 ---
 
-# 14. Online Registration
-Conceptual request:
+# 14. Online Payment and Registration
+
+Public online tickets can be issued only after the backend verifies a captured Razorpay payment. The supported integration is currently Razorpay TEST/SANDBOX mode; live-mode verification and settlement are deferred until organization merchant credentials are available.
+
+Create or replay an order with a UUID idempotency key:
 
 ```http
-POST /api/v1/registrations/
+POST /api/v1/payments/create-order/
 Content-Type: application/json
+Idempotency-Key: 85635d34-bcbf-4a6d-b15e-0019e16bba80
 ```
 
 Example:
@@ -377,20 +384,44 @@ Example:
   "buyer": {
     "name": "Example User",
     "email": "user@example.com",
-    "phone": "9999999999"
-  }
+    "phone": "+919999999999"
+  },
+  "attendee_names": ["Example User"]
 }
 ```
 
-The backend must validate the submitted data.
+For a four-admission offer, `attendee_names` must contain four valid names. The backend derives price, currency, event, and admission count from the selected ticket offer; a client cannot supply payment success or ticket status.
 
-The backend determines the registration source (`ONLINE` for public online registration and `ON_SPOT` for authorized staff registration); clients must not choose it. The response includes the registration/order and a `tickets` array. Ticket quantity is determined from the selected offer by the backend, not trusted from a client-supplied quantity.
+The first order response is `201 Created`; a retry with the same key and normalized request reuses the existing payment intent/order and returns `200 OK`. Reusing the key with a different request returns `409 Conflict`.
+
+After Razorpay Checkout returns its order, payment, and signature values, verify them server-side:
+
+```http
+POST /api/v1/payments/verify/
+Content-Type: application/json
+```
+
+```json
+{
+  "razorpay_order_id": "order_from_checkout",
+  "razorpay_payment_id": "payment_from_checkout",
+  "razorpay_signature": "signature_from_checkout"
+}
+```
+
+The backend validates the checkout signature and retrieves the order and payment from Razorpay. It issues the registration, tickets, unique QR tokens, and delivery record only after the provider confirms matching order, amount, currency, and `captured` status. A repeated verification returns the existing registration and ticket set. PDF generation and email delivery are handled by the backend; delivery failures remain retryable by an administrator without reversing a verified payment or duplicating tickets.
+
+If Razorpay confirms capture but registration/ticket issuance fails, the payment remains recorded as captured, the issuance failure and audit details are retained, and verification returns `409 PAYMENT_REVIEW_REQUIRED`. The associated payment intent and payment are marked for administrator review. A retry does not automatically retry ticket issuance after this state is recorded. Administrators can inspect inconsistencies in the Payment Review page or through `GET /api/v1/payments/review/dashboard/`; the endpoint is restricted to administrators and reports captured payments without complete tickets, duplicate captures, and online tickets without a valid verified payment.
+
+Payment verification is the only financial action supported by this application. No refund API, refund queue, refund state, or Razorpay refund call is supported. Captured-payment cases requiring attention are for manual handling outside this application; the application does not initiate refunds or settlement reversals.
+
+`POST /api/v1/payments/failure/` is an informational browser callback only. Its report is not trusted as proof that Razorpay failed a payment and does not mark an order failed or associate an unverified payment ID. An unexpired order remains reusable.
+
+Direct public `POST /api/v1/registrations/` returns `402 PAYMENT_REQUIRED`; it cannot issue online tickets. Authorized on-spot registration continues through its protected endpoint and does not use Razorpay.
 
 The Dhandiya Night canonical event UUID is `8b3f7a20-6e8d-4b91-a462-9c5d2f1e7043`, with slug `dhandiya-night-2026`. The event listing/detail API is the source of truth for the frontend; do not hardcode the demo ID `evt-technova-2026`.
 
-Configured offer amounts are ₹149 for one admission and ₹447 before applicable taxes for four combo admissions. These are offer prices, not evidence of payment. Do not return or display a successful payment status until a real payment workflow is approved and integrated. Tax amounts and calculations are not defined. The API must not accept client-supplied payment success, status, or tax calculation.
-
-Legacy browser-local and mock registrations, tickets, scans, and users are disposable demo data and are not imported into production.
+Configured offer amounts are ₹149 for one admission and ₹447 before applicable taxes for four combo admissions. Tax amounts and calculations are not defined. Live Razorpay verification and settlement handling remain deferred; refunds are unsupported. Do not treat this TEST/SANDBOX integration as production readiness.
 
 ---
 
@@ -936,20 +967,21 @@ A scanner operation must be able to handle legitimate rapid scanning while still
 
 ---
 
-# 37. Idempotency
-Operations that may be retried should be designed carefully.
+# 37. Registration Idempotency
+Online payment-order and on-spot registration requests require an `Idempotency-Key` header containing a UUID.
 
-Examples:
-
-```text
-Registration submission
-Ticket scanning
-Ticket cancellation
+```http
+Idempotency-Key: 85635d34-bcbf-4a6d-b15e-0019e16bba80
 ```
 
-For ticket scanning, the database transaction and ticket state provide the primary protection against duplicate successful entry.
+The client reuses the same key for retries of one logical attempt. Online requests persist the key and normalized request fingerprint in `PaymentIntent`; its primary-key constraint arbitrates concurrent requests and the intent is associated with the resulting registration and payment records. On-spot requests store the key and fingerprint in `RegistrationIdempotency` in the same transaction that creates the registration and tickets.
 
-If a future architecture introduces client retries or distributed processing, an explicit idempotency strategy may be required.
+- On-spot creation returns `201 Created` with `Idempotency-Replayed: false`; a replay returns the same registration/tickets with `200 OK` and `Idempotency-Replayed: true`.
+- Online order creation returns `201 Created` for a new order and `200 OK` for a replay, with a `replayed` boolean in the JSON response. If the intent is already paid, the replay also returns the original registration/tickets.
+- Reusing the key with a different request returns `409 Conflict` (`IDEMPOTENCY_CONFLICT`).
+- If creation fails, the transaction rolls back the key and any partial registration/tickets, so the same key can be retried.
+
+Different keys remain separate attempts; email and phone are not used as idempotency keys and are not made unique by this behavior. Payment verification is independently protected by persisted payment/order identifiers and a database uniqueness constraint allowing only one verified capture per payment intent.
 
 ---
 
@@ -1359,3 +1391,37 @@ CODE_STYLE.md
 ```
 
 When the implementation changes a stable API convention, update this document rather than allowing documentation and code to drift apart.
+
+---
+
+# 55. Ticket Email Delivery
+
+Ticket email is queued as one `TicketDelivery` record per issued ticket. Online
+deliveries become eligible only after verified payment; on-spot deliveries are
+eligible after registration. The payment verification endpoint does not wait
+for Brevo and never treats an email failure as a payment failure.
+
+Administrators can inspect the queue at `GET /api/v1/payments/delivery/dashboard/`,
+retry a failed message at
+`POST /api/v1/payments/delivery/{delivery_id}/retry/`, and change an unsent
+message's priority at
+`PATCH /api/v1/payments/delivery/{delivery_id}/priority/` with
+`{"priority":"STAFF"}`, `{"priority":"COMPLIMENTARY"}`, or
+`{"priority":"REGULAR"}`. These operations require the ADMIN role.
+
+Brevo delivery callbacks use `POST /api/v1/payments/brevo/webhook/`, the
+`X-Brevo-Webhook-Token` secret, and an event plus message ID. Configure the
+Brevo callback and application secrets out of band; credentials are never
+returned to the frontend.
+
+Run `python manage.py process_ticket_emails` as a scheduled worker, or
+`python manage.py process_ticket_emails --loop` under a process supervisor.
+Configure `BREVO_API_KEY`, `BREVO_SENDER_EMAIL`, and optionally
+`BREVO_SENDER_NAME` and `BREVO_WEBHOOK_TOKEN`. Without the API key and sender,
+the worker exits with a configuration error.
+
+The local daily allocation is strictly 295 regular messages and 5 staff or
+complimentary messages. Unused priority slots are not borrowed by regular
+messages. A timeout or provider 5xx has an ambiguous outcome: the item remains
+in `SENDING` with its slot reserved to prevent duplicate delivery. Reconcile
+such an item against Brevo before taking manual recovery action.
