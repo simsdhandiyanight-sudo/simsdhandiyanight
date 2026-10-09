@@ -1,4 +1,5 @@
 .env
+simsdhandiyanight.env
 .venv/
 venv/
 __pycache__/
