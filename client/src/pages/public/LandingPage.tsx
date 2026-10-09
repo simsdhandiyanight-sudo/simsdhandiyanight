@@ -117,7 +117,7 @@ export const LandingPage: React.FC = () => {
             </div>
             <p className="festival-home-invitation__tagline">Dance <i>•</i> Dandiya <i>•</i> Dhamaka</p>
             <div className="festival-home-invitation__actions">
-              <Link to="/register/dhandiya-night-2026" className="festival-invitation-button">
+              <Link to="/register" className="festival-invitation-button">
                 <span>Register Now</span>
                 <ArrowRight aria-hidden="true" />
               </Link>

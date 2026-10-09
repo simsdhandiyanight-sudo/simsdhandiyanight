@@ -70,7 +70,8 @@ export default function App() {
             <Route path="/events" element={<Navigate to="/events/dhandiya-night-2026" replace />} />
             <Route path="/events/dhandiya-night-2026" element={<EventDetailPage />} />
             <Route path="/events/:eventId" element={<Navigate to="/events/dhandiya-night-2026" replace />} />
-            <Route path="/register/dhandiya-night-2026" element={<RegistrationPage />} />
+            <Route path="/register" element={<RegistrationPage />} />
+            <Route path="/register/dhandiya-night-2026" element={<TicketComingSoonPage />} />
             <Route path="/register/:eventId" element={<Navigate to="/register/dhandiya-night-2026" replace />} />
             <Route path="/registration/success" element={<RegistrationSuccessPage />} />
             <Route path="/ticket/:ticketId" element={<TicketViewPage />} />

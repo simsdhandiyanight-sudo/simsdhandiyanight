@@ -5,7 +5,7 @@ import { Menu, X } from 'lucide-react';
 const navLinks = [
   { label: 'Home', href: '/', isActive: (pathname: string, hash: string) => pathname === '/' && !hash },
   { label: 'Event', href: '/events/dhandiya-night-2026', isActive: (pathname: string) => pathname === '/events/dhandiya-night-2026' },
-  { label: 'Register', href: '/register/dhandiya-night-2026', isActive: (pathname: string) => pathname.startsWith('/register') },
+  { label: 'Register', href: '/register', isActive: (pathname: string) => pathname.startsWith('/register') },
   { label: 'About', href: '/about', isActive: (pathname: string) => pathname === '/about' },
 ];
 
