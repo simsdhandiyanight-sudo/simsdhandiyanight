@@ -14,10 +14,9 @@ export const FestivalPoster: React.FC<FestivalPosterProps> = ({
   <figure className={`festival-poster ${className}`}>
     <div className="festival-poster__frame">
       <img
-        src="/dhandiya-night-festival-celebration.png"
-        srcSet="/dhandiya-night-festival-celebration.webp 1280w"
+        src="/dandiya-night-poster.png"
         sizes="(max-width: 768px) 100vw, 940px"
-        alt="Dhandiya Night festival celebration at Soundarya Institute"
+        alt="Dhandiya Night 2026 event poster"
         className={`festival-poster__image ${imageClassName}`}
         loading={priority ? 'eager' : 'lazy'}
         fetchPriority={priority ? 'high' : 'auto'}

@@ -41,8 +41,7 @@ export const TicketComingSoonPage: React.FC = () => {
     >
       <div className="flex w-full max-w-xl flex-col items-center gap-6 rounded-3xl border border-[#d8bd7c]/80 bg-[#fffaf0]/90 p-4 shadow-2xl backdrop-blur-sm sm:p-6">
         <img
-          src="/dhandiya-night-poster.jpeg"
-          srcSet="/dhandiya-night-poster.webp 900w"
+          src="/dandiya-night-poster.png"
           sizes="(max-width: 768px) 90vw, 576px"
           alt="Dhandiya Night event poster"
           className="h-auto w-full rounded-2xl border border-[#d8bd7c] shadow-xl"
