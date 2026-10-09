@@ -6,6 +6,7 @@ import uuid
 from datetime import timedelta
 from unittest.mock import Mock, patch
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.test import TestCase, override_settings
@@ -509,6 +510,61 @@ class TicketingApiTests(TestCase):
         self.assertEqual(
             TicketDelivery.objects.filter(status=TicketDelivery.Status.PENDING).count(),
             4,
+        )
+
+    def test_payment_order_adds_four_rupees_per_admission(self):
+        six_ticket_combo = TicketTier.objects.create(
+            event=self.event,
+            slug="combo-six",
+            name="Combo Offer — Buy 5, Get 1 Free",
+            price="745.00",
+            admission_count=6,
+        )
+        provider = FakeRazorpayClient()
+        with patch("apps.payments.services.razorpay.Client", return_value=provider):
+            single_order = self.payment_order(
+                self.registration_payload(self.single),
+                uuid.uuid4(),
+                provider,
+            )
+            combo_payload = self.registration_payload(
+                six_ticket_combo,
+                attendee_names=[
+                    "Attendee One",
+                    "Attendee Two",
+                    "Attendee Three",
+                    "Attendee Four",
+                    "Attendee Five",
+                    "Attendee Six",
+                ],
+            )
+            combo_order = self.payment_order(
+                combo_payload,
+                uuid.uuid4(),
+                provider,
+            )
+
+        self.assertEqual(single_order.status_code, 201, single_order.data)
+        self.assertEqual(single_order.data["amount"], 15300)
+        self.assertEqual(single_order.data["display_amount"], 153)
+        self.assertEqual(
+            provider.orders[single_order.data["order_id"]]["amount"],
+            15300,
+        )
+        self.assertEqual(combo_order.status_code, 201, combo_order.data)
+        self.assertEqual(combo_order.data["amount"], 76900)
+        self.assertEqual(combo_order.data["display_amount"], 769)
+        self.assertEqual(
+            provider.orders[combo_order.data["order_id"]]["amount"],
+            76900,
+        )
+        self.assertEqual(
+            Payment.objects.get(intent__ticket_tier=self.single).amount,
+            15300,
+        )
+        self.assertEqual(
+            Payment.objects.get(intent__ticket_tier=six_ticket_combo).amount,
+            76900,
         )
 
     def test_idempotency_key_cannot_be_reused_for_different_request(self):
@@ -1324,6 +1380,27 @@ class TicketingApiTests(TestCase):
         )
         self.assertEqual(logout_response.status_code, 204)
         self.assertEqual(client.get("/api/v1/auth/me/").status_code, 401)
+
+    @override_settings(
+        CSRF_TRUSTED_ORIGINS=[
+            *settings.CSRF_TRUSTED_ORIGINS,
+            "http://localhost:3001",
+        ]
+    )
+    def test_local_vite_origin_can_submit_csrf_protected_payment_requests(self):
+        origin = "http://localhost:3001"
+        client = APIClient(enforce_csrf_checks=True)
+        csrf_token = client.get("/api/v1/auth/csrf/").data["csrfToken"]
+
+        response = client.post(
+            "/api/v1/payments/create-order/",
+            {},
+            format="json",
+            HTTP_ORIGIN=origin,
+            HTTP_X_CSRFTOKEN=csrf_token,
+        )
+
+        self.assertEqual(response.status_code, 400, response.data)
 
     @override_settings(CORS_ALLOWED_ORIGINS=["https://ticketing-test.vercel.app"])
     def test_api_allows_only_configured_credentialed_cors_origin(self):

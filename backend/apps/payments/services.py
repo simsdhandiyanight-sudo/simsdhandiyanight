@@ -26,6 +26,7 @@ from .models import Payment, PaymentIntent, TicketDelivery
 
 logger = logging.getLogger(__name__)
 ORDER_LIFETIME = timedelta(minutes=15)
+ADDITIONAL_CHARGE_PER_ADMISSION_PAISE = 400
 
 
 class PaymentConflict(APIException):
@@ -225,7 +226,10 @@ def create_payment_order(*, idempotency_key, event_id, tier_id, buyer, attendee_
         intent.status = PaymentIntent.Status.PENDING
         intent.expires_at = expires_at
         intent.save(update_fields=("status", "expires_at", "updated_at"))
-        amount = int(tier.price * 100)
+        amount = (
+            int(tier.price * 100)
+            + ADDITIONAL_CHARGE_PER_ADMISSION_PAISE * tier.admission_count
+        )
         payment = Payment.objects.create(
             intent=intent,
             amount=amount,

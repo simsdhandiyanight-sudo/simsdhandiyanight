@@ -29,7 +29,7 @@ export const FEATURED_EVENT: EventItem = {
       name: 'Single Ticket',
       price: 149,
       admissionCount: 1,
-      description: 'One admission. Applicable taxes extra.',
+      description: 'One admission.',
       perks: ['1 welcome drink and 1 set of Dhandiya sticks per ticket'],
       available: 0,
     },

@@ -64,7 +64,7 @@ class Command(BaseCommand):
                 "name": "Single Ticket",
                 "price": "149.00",
                 "admission_count": 1,
-                "description": "One admission. Applicable taxes extra.",
+                "description": "One admission.",
                 "perks": ["1 welcome drink and 1 set of Dhandiya sticks per ticket"],
             },
             {

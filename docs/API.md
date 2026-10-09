@@ -421,7 +421,7 @@ Direct public `POST /api/v1/registrations/` returns `402 PAYMENT_REQUIRED`; it c
 
 The Dhandiya Night canonical event UUID is `8b3f7a20-6e8d-4b91-a462-9c5d2f1e7043`, with slug `dhandiya-night-2026`. The public landing page uses hardcoded descriptive content; event detail and ticket availability are loaded from the backend API. Render seeds the canonical event and ticket tiers at startup. Do not use the frontend demo ID `evt-technova-2026` as the production event primary key.
 
-Configured offer amounts are ₹149 for one admission and ₹745 before applicable taxes for six combo admissions. Tax amounts and calculations are not defined. Live Razorpay verification and settlement handling remain deferred; refunds are unsupported. Do not treat this TEST/SANDBOX integration as production readiness.
+Configured offer prices are ₹149 for one admission and ₹745 for six combo admissions. Razorpay orders include an additional fixed ₹4 per admission (₹153 single; ₹769 combo); this charge is not shown on the registration page and is not a percentage-based tax calculation. Live Razorpay verification and settlement handling remain deferred; refunds are unsupported. Do not treat this TEST/SANDBOX integration as production readiness.
 
 ---
 

@@ -7,7 +7,8 @@ from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 REPOSITORY_ROOT = BASE_DIR.parent
-load_dotenv(REPOSITORY_ROOT / ".env")
+env_file = os.environ.get("ENV_FILE")
+load_dotenv(Path(env_file) if env_file else REPOSITORY_ROOT / ".env")
 
 SECRET_KEY = os.environ.get("SECRET_KEY", "development-only-change-me")
 DEBUG = os.environ.get("DEBUG", "true").lower() == "true"
@@ -20,6 +21,20 @@ ALLOWED_HOSTS = [
     ).split(",")
     if host.strip()
 ]
+LOCAL_DEV_ORIGINS = (
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "http://localhost:3002",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:3001",
+    "http://127.0.0.1:3002",
+)
+if DEBUG:
+    ALLOWED_HOSTS.extend(
+        host
+        for host in ("localhost", "127.0.0.1")
+        if host not in ALLOWED_HOSTS
+    )
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -149,11 +164,23 @@ CSRF_TRUSTED_ORIGINS = [
     for origin in os.environ.get("CSRF_TRUSTED_ORIGINS", "").split(",")
     if origin.strip()
 ]
+if DEBUG:
+    CSRF_TRUSTED_ORIGINS.extend(
+        origin
+        for origin in LOCAL_DEV_ORIGINS
+        if origin not in CSRF_TRUSTED_ORIGINS
+    )
 CORS_ALLOWED_ORIGINS = [
     origin.strip().rstrip("/")
     for origin in os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",")
     if origin.strip()
 ]
+if DEBUG:
+    CORS_ALLOWED_ORIGINS.extend(
+        origin
+        for origin in LOCAL_DEV_ORIGINS
+        if origin not in CORS_ALLOWED_ORIGINS
+    )
 CORS_ALLOW_HEADERS = (*default_headers, "idempotency-key")
 CORS_ALLOW_CREDENTIALS = True
 

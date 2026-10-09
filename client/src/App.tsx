@@ -11,6 +11,7 @@ import { StaffUser } from './types';
 
 const LandingPage = lazy(() => import('./pages/public/LandingPage').then((module) => ({ default: module.LandingPage })));
 const EventDetailPage = lazy(() => import('./pages/public/EventDetailPage').then((module) => ({ default: module.EventDetailPage })));
+const RegistrationPage = lazy(() => import('./pages/public/RegistrationPage').then((module) => ({ default: module.RegistrationPage })));
 const RegistrationSuccessPage = lazy(() => import('./pages/public/RegistrationSuccessPage').then((module) => ({ default: module.RegistrationSuccessPage })));
 const TicketViewPage = lazy(() => import('./pages/public/TicketViewPage').then((module) => ({ default: module.TicketViewPage })));
 const TicketComingSoonPage = lazy(() => import('./pages/public/TicketComingSoonPage').then((module) => ({ default: module.TicketComingSoonPage })));
@@ -69,8 +70,8 @@ export default function App() {
             <Route path="/events" element={<Navigate to="/events/dhandiya-night-2026" replace />} />
             <Route path="/events/dhandiya-night-2026" element={<EventDetailPage />} />
             <Route path="/events/:eventId" element={<Navigate to="/events/dhandiya-night-2026" replace />} />
-            <Route path="/register/dhandiya-night-2026" element={<Navigate to="/" replace />} />
-            <Route path="/register/:eventId" element={<Navigate to="/" replace />} />
+            <Route path="/register/dhandiya-night-2026" element={<RegistrationPage />} />
+            <Route path="/register/:eventId" element={<Navigate to="/register/dhandiya-night-2026" replace />} />
             <Route path="/registration/success" element={<RegistrationSuccessPage />} />
             <Route path="/ticket/:ticketId" element={<TicketViewPage />} />
             <Route path="/ticket-coming-soon" element={<TicketComingSoonPage />} />

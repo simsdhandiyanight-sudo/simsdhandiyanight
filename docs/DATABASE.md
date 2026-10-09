@@ -150,7 +150,7 @@ admission_count
 availability
 ```
 
-For Dhandiya Night, prices are INR 149 for one admission and INR 745 before applicable taxes for a six-admission combo. Payment amounts are persisted in minor currency units from the selected offer; no tax amount is currently calculated or stored. `admission_count` describes the admissions issued for one selected offer; capacity is reserved while a payment order is pending and consumed for each resulting ticket.
+For Dhandiya Night, the registration page shows INR 149 for one admission and INR 745 for a six-admission combo. Razorpay orders add a fixed ₹4 per admission (₹153 and ₹769 total, respectively); this charge is included in the persisted payment amount in minor currency units and is not shown on the registration page. `admission_count` describes the admissions issued for one selected offer; capacity is reserved while a payment order is pending and consumed for each resulting ticket.
 
 ---
 

@@ -22,7 +22,7 @@ This document records decisions needed to move the current Dhandiya Night demo t
 
 **DECIDED**
 
-- The current configured offers are one Single Ticket for ₹149 before applicable taxes, and one Combo Offer for ₹745 before applicable taxes.
+- The current configured offers are ₹149 for one admission and ₹745 for the six-admission combo. Razorpay charges an additional fixed ₹4 per admission (₹153 for a single ticket and ₹769 for the combo); the additional charge is not shown on the registration page.
 - The combo covers six admissions: five paid admissions and one included free admission. One buyer/contact may purchase/register the combo; the backend creates six independently scannable tickets under that registration.
 - The combo consumes six units of event admission capacity. The offer itself is one purchasable package; package availability and admission capacity are distinct quantities.
 - The buyer's registration is not a substitute for the six ticket credentials. Entry is validated per ticket.
@@ -62,19 +62,19 @@ This document records decisions needed to move the current Dhandiya Night demo t
 
 **DECIDED**
 
-- The ticket-offer prices currently specified in the product UI are ₹149 for one admission and ₹745 for the six-admission combo, before applicable taxes; the currency is INR.
+- The ticket-offer prices shown in the product UI are ₹149 for one admission and ₹745 for the six-admission combo; the currency is INR. Razorpay collects an additional fixed ₹4 per admission, included in the order amount but not shown on the registration page.
 - The Razorpay TEST/SANDBOX integration persists payment intents and payment attempts. Online tickets are issued only after backend signature and provider verification confirms a captured payment matching the order amount and currency.
 - Payment state, registration state, and individual ticket state are separate concepts. A browser callback cannot establish payment success or failure; ticket creation requires backend payment verification.
 - A verified payment creates one registration, the corresponding tickets and QR tokens, and a retryable backend PDF/email delivery record.
 - Payment verification is the only financial action supported by the application. Refunds and settlement reversals are not supported, and the application must never initiate them.
 - If a provider-confirmed captured payment cannot be matched or its tickets cannot be issued, preserve the captured payment and audit details, mark it `ADMIN_REVIEW_REQUIRED`, and expose it to administrators for manual handling outside the application. Do not issue an automatic refund.
 - Live-mode verification and settlement are deferred until organization merchant/bank credentials are available. Test-mode validation does not establish production readiness.
-- No tax amount is calculated or displayed because the tax treatment and rate remain undecided.
+- The ₹4 per-admission charge is a fixed additional charge, not a percentage-based tax calculation. Tax applicability and treatment remain undecided.
 
 **UNRESOLVED**
 
 - Production payment methods, trusted webhook policy, and settlement behavior.
-- Tax applicability, taxable base, rate, rounding, and receipt/invoice requirements.
+- Tax applicability, taxable base, rate, and receipt/invoice requirements for any applicable tax.
 - Whether an event-level `payment_required` setting is needed for future free or differently-priced events.
 
 ## 6. Legacy demo-data policy

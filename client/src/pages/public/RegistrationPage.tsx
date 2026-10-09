@@ -531,6 +531,9 @@ export const RegistrationPage: React.FC = () => {
                     aria-describedby={fieldErrors.email ? 'attendee-email-error' : undefined}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   />
+                  <p className="mt-1.5 text-[10px] text-slate-400">
+                    Please provide a valid email ID, as your ticket will be received on this email.
+                  </p>
                   {fieldErrors.email && (
                     <p id="attendee-email-error" className="text-xs text-rose-400 mt-1">{fieldErrors.email}</p>
                   )}
@@ -650,7 +653,7 @@ export const RegistrationPage: React.FC = () => {
                         <span className="font-semibold text-sm text-white">{tier.name}</span>
                       </div>
                       <span className="font-mono font-bold text-sm text-indigo-300">
-                        ₹{tier.price} + tax
+                        ₹{tier.price}
                       </span>
                     </div>
 
@@ -796,11 +799,11 @@ export const RegistrationPage: React.FC = () => {
               <div className="pt-3 border-t border-slate-800 flex justify-between items-center text-xs">
                 <span className="text-slate-400">
                   {selectedAdmissionCount > 1
-                    ? `${selectedAdmissionCount - 1} tickets + 1 free • before tax`
-                    : 'Total • before tax'}
+                    ? `${selectedAdmissionCount - 1} tickets + 1 free • total`
+                    : 'Total'}
                 </span>
                 <span className="text-lg font-bold font-mono text-white">
-                  ₹{selectedTier.price} + applicable taxes
+                  ₹{selectedTier.price}
                 </span>
               </div>
             </div>

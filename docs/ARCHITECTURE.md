@@ -545,7 +545,7 @@ Each generated ticket must be compatible with the same scanner used for online t
 
 A registration represents one buyer's order and owns the buyer/contact information. It has a one-to-many relationship to Ticket. Ticket identity, status, QR token, and scan history are per ticket; buyer details are not duplicated across the ticket records.
 
-Ticket offers preserve the configured Dhandiya Night amounts in INR: ₹149 for one admission and ₹745 before applicable taxes for a combo of six admissions (five paid, one included). The production payment provider, tax treatment, and whether tickets may be issued before payment are not yet decided. Registration creation must not be represented as payment success, and no payment records or tax amounts are fabricated. See `docs/PRODUCT_DECISIONS.md`.
+Ticket offers preserve the configured Dhandiya Night prices in INR: ₹149 for one admission and ₹745 for a combo of six admissions (five paid, one included). Razorpay orders add a fixed ₹4 per admission (₹153 single; ₹769 combo); this charge is not shown on the registration page. Registration creation must not be represented as payment success, and payment records must not be fabricated. See `docs/PRODUCT_DECISIONS.md`.
 
 ---
 
