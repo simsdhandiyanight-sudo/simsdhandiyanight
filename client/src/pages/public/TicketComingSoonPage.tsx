@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 
-const COUNTDOWN_DURATION_MS = 12 * 60 * 60 * 1000;
-const START_TIME = Date.now();
+const RELEASE_TIME = new Date('2026-10-10T02:57:00+05:30').getTime();
 
 export const TicketComingSoonPage: React.FC = () => {
   const [now, setNow] = useState(Date.now());
@@ -15,7 +14,7 @@ export const TicketComingSoonPage: React.FC = () => {
   }, []);
 
   const timeLeft = useMemo(() => {
-    const diff = Math.max(START_TIME + COUNTDOWN_DURATION_MS - now, 0);
+    const diff = Math.max(RELEASE_TIME - now, 0);
     const totalSeconds = Math.floor(diff / 1000);
     const hours = Math.floor(totalSeconds / 3600);
     const minutes = Math.floor((totalSeconds % 3600) / 60);
