@@ -5,7 +5,7 @@ services:
     rootDir: backend
     plan: starter
     buildCommand: pip install -r requirements.txt && python manage.py collectstatic --no-input
-    startCommand: python manage.py migrate --noinput && python manage.py seed_dhandiya_event && python manage.py bootstrap_admin && gunicorn config.wsgi:application --bind 0.0.0.0:$PORT
+    startCommand: python manage.py migrate --noinput && python manage.py migrate_legacy_payment_proofs && python manage.py seed_dhandiya_event && python manage.py bootstrap_admin && gunicorn config.wsgi:application --bind 0.0.0.0:$PORT
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.10
@@ -42,6 +42,20 @@ services:
       - key: PAYU_WEBHOOK_URL
         sync: false
       - key: PAYU_FRONTEND_URL
+        sync: false
+      - key: PAYMENT_UPI_ID
+        sync: false
+      - key: PAYMENT_UPI_QR_IMAGE_URL
+        sync: false
+      - key: PAYMENT_PROOF_RESERVATION_HOURS
+        value: "24"
+      - key: PAYMENT_PROOF_RESUBMISSION_HOURS
+        value: "12"
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
         sync: false
       - key: BREVO_API_KEY
         sync: false
@@ -112,3 +126,82 @@ services:
           type: web
           name: sims-dhandiya-api
           envVarKey: BREVO_SENDER_NAME
+      - key: PAYMENT_UPI_ID
+        fromService:
+          type: web
+          name: sims-dhandiya-api
+          envVarKey: PAYMENT_UPI_ID
+      - key: PAYMENT_UPI_QR_IMAGE_URL
+        fromService:
+          type: web
+          name: sims-dhandiya-api
+          envVarKey: PAYMENT_UPI_QR_IMAGE_URL
+      - key: PAYMENT_PROOF_RESERVATION_HOURS
+        fromService:
+          type: web
+          name: sims-dhandiya-api
+          envVarKey: PAYMENT_PROOF_RESERVATION_HOURS
+      - key: PAYMENT_PROOF_RESUBMISSION_HOURS
+        fromService:
+          type: web
+          name: sims-dhandiya-api
+          envVarKey: PAYMENT_PROOF_RESUBMISSION_HOURS
+
+  - type: cron
+    name: sims-dhandiya-payment-proof-expiry
+    runtime: python
+    rootDir: backend
+    plan: starter
+    schedule: "*/5 * * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python manage.py expire_payment_proof_reservations
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.10
+      - key: SECRET_KEY
+        fromService:
+          type: web
+          name: sims-dhandiya-api
+          envVarKey: SECRET_KEY
+      - key: DATABASE_URL
+        fromService:
+          type: web
+          name: sims-dhandiya-api
+          envVarKey: DATABASE_URL
+
+  - type: cron
+    name: sims-dhandiya-payment-proof-cloudinary-cleanup
+    runtime: python
+    rootDir: backend
+    plan: starter
+    schedule: "20 3 * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python manage.py cleanup_orphaned_payment_proofs
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.10
+      - key: SECRET_KEY
+        fromService:
+          type: web
+          name: sims-dhandiya-api
+          envVarKey: SECRET_KEY
+      - key: DATABASE_URL
+        fromService:
+          type: web
+          name: sims-dhandiya-api
+          envVarKey: DATABASE_URL
+      - key: CLOUDINARY_CLOUD_NAME
+        fromService:
+          type: web
+          name: sims-dhandiya-api
+          envVarKey: CLOUDINARY_CLOUD_NAME
+      - key: CLOUDINARY_API_KEY
+        fromService:
+          type: web
+          name: sims-dhandiya-api
+          envVarKey: CLOUDINARY_API_KEY
+      - key: CLOUDINARY_API_SECRET
+        fromService:
+          type: web
+          name: sims-dhandiya-api
+          envVarKey: CLOUDINARY_API_SECRET

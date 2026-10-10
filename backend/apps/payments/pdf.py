@@ -252,3 +252,81 @@ def generate_tickets_pdf(tickets):
 
     document.build(story)
     return output.getvalue()
+
+
+def generate_ticket_id_confirmation_pdf(registration):
+    from .models import Payment
+
+    payment = Payment.objects.filter(
+        intent__registration=registration,
+        provider=Payment.Provider.UPI_MANUAL,
+    ).order_by("-submitted_at", "-created_at").first()
+    if payment and payment.status == Payment.Status.PENDING_VERIFICATION:
+        payment_status = "Pending Verification"
+    elif payment:
+        payment_status = payment.get_status_display()
+    else:
+        payment_status = "Pending Payment"
+    output = BytesIO()
+    document = SimpleDocTemplate(
+        output,
+        pagesize=A5,
+        rightMargin=16 * mm,
+        leftMargin=16 * mm,
+        topMargin=18 * mm,
+        bottomMargin=16 * mm,
+        title=f"Ticket ID confirmation for {registration.event.name}",
+    )
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        "TicketIdConfirmationTitle",
+        parent=styles["Title"],
+        alignment=TA_CENTER,
+        textColor=colors.HexColor("#b71959"),
+        fontName="Helvetica-Bold",
+        fontSize=18,
+        leading=23,
+        spaceAfter=7 * mm,
+    )
+    body_style = ParagraphStyle(
+        "TicketIdConfirmationBody",
+        parent=styles["BodyText"],
+        fontSize=11,
+        leading=16,
+        spaceAfter=3 * mm,
+    )
+    notice_style = ParagraphStyle(
+        "TicketIdConfirmationNotice",
+        parent=body_style,
+        alignment=TA_CENTER,
+        textColor=colors.HexColor("#8f1747"),
+        fontName="Helvetica-Bold",
+        spaceBefore=7 * mm,
+    )
+    story = [
+        Paragraph("Ticket ID Confirmation", title_style),
+        Paragraph(
+            "Soundarya Institute of Management and Science (SIMS)",
+            body_style,
+        ),
+        Paragraph(f"<b>Event:</b> {escape(registration.event.name)}", body_style),
+        Paragraph(f"<b>Applicant:</b> {escape(registration.buyer_name)}", body_style),
+        Paragraph(
+            f"<b>Ticket ID:</b> {escape(registration.ticket_id or 'Pending')}",
+            body_style,
+        ),
+        Paragraph(
+            f"<b>Registration reference:</b> {escape(registration.registration_code)}",
+            body_style,
+        ),
+        Paragraph(
+            f"<b>Payment verification status:</b> {escape(payment_status)}",
+            body_style,
+        ),
+        Paragraph(
+            "This document is not the final admission ticket and does not authorize event entry.",
+            notice_style,
+        ),
+    ]
+    document.build(story)
+    return output.getvalue()

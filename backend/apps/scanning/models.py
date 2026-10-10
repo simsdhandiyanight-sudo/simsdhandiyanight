@@ -32,6 +32,7 @@ class TicketScan(models.Model):
         ALREADY_USED = "ALREADY_USED", "Already used"
         INVALID_TICKET = "INVALID_TICKET", "Invalid ticket"
         CANCELLED = "CANCELLED", "Cancelled ticket"
+        PAYMENT_NOT_VERIFIED = "PAYMENT_NOT_VERIFIED", "Payment not verified"
         WRONG_EVENT = "WRONG_EVENT", "Wrong event"
         EVENT_CLOSED = "EVENT_CLOSED", "Event closed"
 

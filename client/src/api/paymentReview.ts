@@ -1,4 +1,30 @@
-import { apiRequest } from './http';
+import { apiBlob, apiRequest } from './http';
+
+export interface ManualPaymentProof {
+  payment_id: string;
+  registration_id: string;
+  registration_code: string;
+  ticket_id: string | null;
+  registration_status: string;
+  applicant_name: string;
+  applicant_email: string;
+  event_name: string;
+  ticket_tier_name: string;
+  expected_amount: number;
+  currency: string;
+  utr_reference: string;
+  transaction_id: string;
+  screenshot_url: string;
+  submitted_at: string;
+  payment_status: string;
+  rejection_reason: string;
+  rejection_deadline: string | null;
+  verified_by: string | null;
+  verified_at: string | null;
+  rejected_by: string | null;
+  rejected_at: string | null;
+  rejection_email_status: string;
+}
 
 export interface PaymentReviewPayment {
   payment_id: string;
@@ -58,4 +84,22 @@ export const paymentReviewApi = {
     apiRequest<unknown>(`/payments/review/${encodeURIComponent(paymentId)}/reconcile/`, {
       method: 'POST',
     }),
+  getProofDashboard: () =>
+    apiRequest<{ proofs: ManualPaymentProof[] }>('/payments/proof/dashboard/'),
+  getProofScreenshot: (screenshotUrl: string) => apiBlob(screenshotUrl),
+  approveProof: (paymentId: string) =>
+    apiRequest<unknown>(`/payments/proof/${encodeURIComponent(paymentId)}/approve/`, {
+      method: 'POST',
+      body: JSON.stringify({ confirmed_received: true }),
+    }),
+  rejectProof: (paymentId: string, reason: string) =>
+    apiRequest<unknown>(`/payments/proof/${encodeURIComponent(paymentId)}/reject/`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    }),
+  retryProofRejectionEmail: (paymentId: string) =>
+    apiRequest<unknown>(
+      `/payments/proof/${encodeURIComponent(paymentId)}/retry-rejection-email/`,
+      { method: 'POST' },
+    ),
 };

@@ -4,11 +4,11 @@ from urllib.parse import urlencode
 
 from django.conf import settings
 from django.db import transaction
-from django.http import HttpResponseRedirect
+from django.http import HttpResponse, HttpResponseRedirect
 from django.urls import reverse
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_protect
-from rest_framework import serializers, status
+from rest_framework import parsers, serializers, status
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -19,6 +19,18 @@ from apps.audit.models import AuditLog
 from apps.registrations.serializers import CreateRegistrationSerializer
 from .delivery import get_delivery_dashboard, handle_brevo_webhook
 from .models import Payment, TicketDelivery
+from .proof import (
+    approve_manual_payment,
+    generate_payment_proof_confirmation_pdf,
+    get_manual_payment_proof_dashboard,
+    get_payment_proof_status,
+    payment_proof_screenshot,
+    reject_manual_payment,
+    retry_payment_rejection_email,
+    start_payment_proof_registration,
+    submit_payment_proof,
+    validate_payment_proof_image,
+)
 from .services import (
     PaymentReviewRequired,
     PaymentProviderUnavailable,
@@ -78,6 +90,195 @@ class PayUCreatePaymentView(APIView):
             else status.HTTP_201_CREATED
         )
         return Response(result, status=response_status)
+
+
+class PaymentProofRegistrationView(APIView):
+    permission_classes = [AllowAny]
+
+    @method_decorator(csrf_protect)
+    def post(self, request):
+        serializer = CreateRegistrationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        validated = serializer.validated_data
+        result = start_payment_proof_registration(
+            idempotency_key=get_idempotency_key(request),
+            event_id=validated["event_id"],
+            tier_id=validated["ticket_tier_id"],
+            buyer=validated["buyer"],
+            attendee_names=validated.get("attendee_names")
+            or [validated["buyer"]["name"]],
+        )
+        response = Response(
+            result,
+            status=status.HTTP_200_OK if result["replayed"] else status.HTTP_201_CREATED,
+        )
+        response["Cache-Control"] = "no-store, private"
+        return response
+
+
+class PaymentProofSubmissionSerializer(serializers.Serializer):
+    utr_reference = serializers.RegexField(
+        r"^[A-Za-z0-9/-]{6,40}$",
+        max_length=40,
+        trim_whitespace=True,
+    )
+    transaction_id = serializers.RegexField(
+        r"^[A-Za-z0-9/-]{6,40}$",
+        max_length=40,
+        trim_whitespace=True,
+    )
+    screenshot = serializers.FileField()
+
+
+class PaymentProofSubmissionView(APIView):
+    permission_classes = [AllowAny]
+    parser_classes = [parsers.MultiPartParser, parsers.FormParser]
+
+    @method_decorator(csrf_protect)
+    def post(self, request, registration_id):
+        serializer = PaymentProofSubmissionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        access_token = serializers.UUIDField().run_validation(
+            request.headers.get("X-Proof-Access-Token", "")
+        )
+        screenshot = serializer.validated_data["screenshot"]
+        content_type = validate_payment_proof_image(screenshot)
+        submit_payment_proof(
+            registration_id=registration_id,
+            proof_access_token=access_token,
+            submission_key=get_idempotency_key(request),
+            utr_reference=serializer.validated_data["utr_reference"].upper(),
+            transaction_id=serializer.validated_data["transaction_id"].upper(),
+            screenshot=screenshot,
+            screenshot_content_type=content_type,
+        )
+        result = get_payment_proof_status(
+            registration_id=registration_id,
+            proof_access_token=access_token,
+        )
+        response = Response(result, status=status.HTTP_201_CREATED)
+        response["Cache-Control"] = "no-store, private"
+        return response
+
+
+class PaymentProofStatusView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def get(self, request, registration_id):
+        proof_access_token = serializers.UUIDField().run_validation(
+            request.headers.get("X-Proof-Access-Token", "")
+        )
+        response = Response(
+            get_payment_proof_status(
+                registration_id=registration_id,
+                proof_access_token=proof_access_token,
+            )
+        )
+        response["Cache-Control"] = "no-store, private"
+        return response
+
+
+class PaymentProofConfirmationView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def get(self, request, registration_id):
+        proof_access_token = serializers.UUIDField().run_validation(
+            request.headers.get("X-Proof-Access-Token", "")
+        )
+        details = get_payment_proof_status(
+            registration_id=registration_id,
+            proof_access_token=proof_access_token,
+        )
+        if details["payment_status"] not in (
+            Payment.Status.PENDING_VERIFICATION,
+            Payment.Status.VERIFIED,
+            Payment.Status.REJECTED,
+        ):
+            raise NotFound("A Ticket ID confirmation is not available yet.")
+        from apps.registrations.models import Registration
+
+        registration = Registration.objects.select_related(
+            "event",
+            "ticket_tier",
+        ).get(pk=registration_id)
+        response = HttpResponse(
+            generate_payment_proof_confirmation_pdf(registration),
+            content_type="application/pdf",
+        )
+        response["Content-Disposition"] = (
+            f'attachment; filename="ticket-id-{registration.ticket_id}.pdf"'
+        )
+        response["Cache-Control"] = "no-store, private"
+        return response
+
+
+class PaymentProofDashboardView(APIView):
+    permission_classes = [IsAuthenticated, IsAdministrator]
+
+    def get(self, request):
+        return Response({"proofs": get_manual_payment_proof_dashboard()})
+
+
+class PaymentProofScreenshotView(APIView):
+    permission_classes = [IsAuthenticated, IsAdministrator]
+
+    def get(self, request, payment_id):
+        content, content_type = payment_proof_screenshot(payment_id)
+        response = HttpResponse(content, content_type=content_type)
+        response["Content-Disposition"] = "inline"
+        response["Cache-Control"] = "no-store, private"
+        response["X-Content-Type-Options"] = "nosniff"
+        return response
+
+
+class PaymentProofApproveSerializer(serializers.Serializer):
+    confirmed_received = serializers.BooleanField()
+
+
+class PaymentProofApproveView(APIView):
+    permission_classes = [IsAuthenticated, IsAdministrator]
+
+    @method_decorator(csrf_protect)
+    def post(self, request, payment_id):
+        serializer = PaymentProofApproveSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        if not serializer.validated_data["confirmed_received"]:
+            raise ValidationError(
+                {"confirmed_received": "Confirm actual receipt in the bank/UPI records."}
+            )
+        return Response(approve_manual_payment(
+            payment_id=payment_id,
+            administrator=request.user,
+            confirmed_received=serializer.validated_data["confirmed_received"],
+        ))
+
+
+class PaymentProofRejectSerializer(serializers.Serializer):
+    reason = serializers.CharField(max_length=1000, trim_whitespace=True)
+
+
+class PaymentProofRejectView(APIView):
+    permission_classes = [IsAuthenticated, IsAdministrator]
+
+    @method_decorator(csrf_protect)
+    def post(self, request, payment_id):
+        serializer = PaymentProofRejectSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        return Response(reject_manual_payment(
+            payment_id=payment_id,
+            administrator=request.user,
+            reason=serializer.validated_data["reason"],
+        ))
+
+
+class PaymentProofRejectionEmailRetryView(APIView):
+    permission_classes = [IsAuthenticated, IsAdministrator]
+
+    @method_decorator(csrf_protect)
+    def post(self, request, payment_id):
+        return Response(retry_payment_rejection_email(payment_id=payment_id))
 
 
 class PayUCallbackView(APIView):

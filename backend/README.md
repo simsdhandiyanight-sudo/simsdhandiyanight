@@ -99,6 +99,45 @@ stored PDF on retries, reserves 295 regular and 5 staff/complimentary sends per
 local calendar day, and retains ambiguous outcomes for manual reconciliation.
 No live Brevo send has been validated by the test suite.
 
+Payment screenshots are uploaded by the backend using the official Cloudinary
+SDK. Set `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and
+`CLOUDINARY_API_SECRET` as secrets on the Render web service; never set these
+in the frontend. Proofs are uploaded as `authenticated` image assets under
+`college-ticketing/payment-proofs`, not public assets. PostgreSQL stores the
+Cloudinary asset identifiers and image metadata. The admin-only screenshot
+endpoint proxies Cloudinary's signed authenticated delivery server-side; it
+does not send Cloudinary URLs or credentials to the browser. New proof images
+are not stored as database binary data.
+
+On startup, `migrate_legacy_payment_proofs` transfers pre-existing binary
+proofs to Cloudinary and clears their database binary values. Configure the
+Cloudinary credentials before deploying this change if existing manual proof
+records need to be retained. The daily Render cleanup cron deletes only
+unreferenced authenticated assets at least seven days old. Referenced proofs,
+including rejected submissions, are retained for reconciliation and disputes;
+apply an explicit retention policy before deleting them.
+
+Online registration uses manual UPI payment proof: configure
+`PAYMENT_UPI_ID` and `PAYMENT_UPI_QR_IMAGE_URL` on the Render web service before
+opening registration. The QR URL must be HTTPS in production and point to the
+static UPI QR image for the configured VPA. Set
+`PAYMENT_PROOF_RESERVATION_HOURS` (default 24) and
+`PAYMENT_PROOF_RESUBMISSION_HOURS` (default 12) to the reservation windows.
+Uploaded JPEG/PNG/WebP proof images are capped at 5 MB and stored in the
+private Cloudinary assets (not in PostgreSQL or the ephemeral Render
+filesystem); only administrators can retrieve them through the authorized
+backend proxy. The approval dashboard requires an
+administrator to confirm the actual received UTR/amount against bank/UPI
+records before approval. The Render expiry cron releases unpaid/rejected
+reservations every five minutes.
+Applicants submit both the UTR and transaction ID as separate required
+references; each is checked against prior manual UPI submissions.
+
+Final tickets use the existing Brevo delivery worker. A verified payment stays
+verified if email delivery fails; admins can retry failed ticket delivery from
+the Email Delivery panel without generating new tickets or QR codes. Configure
+`BREVO_API_KEY` and the verified sender settings before production.
+
 Schedule `python manage.py reconcile_payu_payments` on the backend every
 minute or every few minutes to retry due PayU verifications. Each run is a
 bounded pass; automatic verification uses at most five attempts per payment

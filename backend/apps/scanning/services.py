@@ -3,6 +3,7 @@ from django.utils import timezone
 
 from apps.audit.models import AuditLog
 from apps.events.models import Event
+from apps.registrations.models import Registration
 from apps.tickets.models import Ticket
 from .models import StaffAssignment, TicketScan
 
@@ -43,6 +44,10 @@ def scan_ticket(*, token, scanner):
         result = TicketScan.Result.WRONG_EVENT
     elif gate.event.status != Event.Status.OPEN:
         result = TicketScan.Result.EVENT_CLOSED
+    elif ticket.registration.source != Registration.Source.ON_SPOT and (
+        ticket.registration.status != Registration.Status.TICKET_ISSUED
+    ):
+        result = TicketScan.Result.PAYMENT_NOT_VERIFIED
     else:
         result = TicketScan.Result.ENTRY_GRANTED
         ticket.status = Ticket.Status.USED

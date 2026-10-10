@@ -885,6 +885,13 @@ If future features allow users or staff to upload files:
 
 This applies to any future ticket/document upload feature.
 
+Payment proof images must be content-validated and size-limited server-side.
+Store them as Cloudinary `authenticated` assets; a folder or unguessable URL is
+not an access control. Deliver proofs only from an administrator-authorized
+backend endpoint, proxying the signed Cloudinary request without exposing its
+URL or credentials. Do not log signed delivery URLs or proof capability
+headers.
+
 ---
 
 # 39. QR Image Security

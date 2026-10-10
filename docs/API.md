@@ -78,6 +78,13 @@ The actual deployed domain must come from environment configuration.
 
 Do not hardcode production domains throughout the frontend.
 
+## Manual payment proof submission
+
+`POST /api/v1/payments/proof/registrations/{registration_id}/submit/` accepts
+multipart form data containing separate `utr_reference` and `transaction_id`
+values plus the payment screenshot. Both references are required, normalized
+to uppercase, and checked for duplicates among manual UPI submissions.
+
 ---
 
 # 4. API Versioning
@@ -930,6 +937,12 @@ such as:
 ```
 
 unless there is a very specific, reviewed requirement.
+
+The public manual-payment status and Ticket ID confirmation endpoints use the
+opaque `X-Proof-Access-Token` request header. Do not move this capability token
+into a URL or log it. Payment proof screenshots are only delivered through the
+authenticated administrator screenshot endpoint; Cloudinary delivery URLs are
+never returned to the frontend.
 
 ---
 

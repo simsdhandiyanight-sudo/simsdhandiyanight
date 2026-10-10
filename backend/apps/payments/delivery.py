@@ -13,7 +13,7 @@ from django.utils import timezone
 from apps.registrations.models import Registration
 from apps.tickets.models import Ticket
 
-from .models import EmailDailyUsage, TicketDelivery
+from .models import EmailDailyUsage, Payment, TicketDelivery
 from .pdf import generate_tickets_pdf
 
 logger = logging.getLogger(__name__)
@@ -179,6 +179,12 @@ def _ticket_email_content(ticket):
         f"{local_end.strftime('%I:%M %p').lstrip('0')}"
     )
     attendee = ticket.attendee_name or registration.buyer_name
+    manual_payment_verified = Payment.objects.filter(
+        intent__registration=registration,
+        provider="UPI_MANUAL",
+        status="VERIFIED",
+    ).exists()
+    ticket_id = registration.ticket_id or registration.registration_code
     details = [
         ("Event", event.name),
         ("Date", event_date),
@@ -187,13 +193,17 @@ def _ticket_email_content(ticket):
         ("Venue", event.venue),
         ("Location", event.address),
         ("Attendee", attendee),
-        ("Ticket ID", ticket.ticket_code),
+        ("Ticket ID", ticket_id if manual_payment_verified else ticket.ticket_code),
         ("Ticket type", registration.ticket_tier.name),
     ]
     plain = [
         f"Dear {attendee},",
         "",
-        f"Your registration for {event.name} has been confirmed.",
+        (
+            f"Payment for your registration for {event.name} has been verified."
+            if manual_payment_verified
+            else f"Your registration for {event.name} has been confirmed."
+        ),
         "",
         "EVENT DETAILS",
         *(f"{label}: {value}" for label, value in details),
@@ -238,6 +248,17 @@ def _ticket_email_content(ticket):
             f"Regards,\n{event.name}",
         )
     )
+    if manual_payment_verified:
+        plain.extend(
+            (
+                "",
+                "Your final admission ticket is attached. Download it and present its QR code at the entry gate.",
+            )
+        )
+        markup.append(
+            "<p>Your payment has been verified. Download the attached final admission ticket "
+            "and present its QR code at the entry gate.</p>"
+        )
     markup.extend(
         (
             "<p>Please carry this ticket and present its QR code at the entry gate.</p>",
@@ -246,10 +267,105 @@ def _ticket_email_content(ticket):
         )
     )
     return (
-        f"Your Ticket – {event.name} | {local_start.strftime('%d %B %Y')}",
+        (
+            f"Payment Verified – Your Admission Ticket [{ticket_id}]"
+            if manual_payment_verified
+            else f"Your Ticket – {event.name} | {local_start.strftime('%d %B %Y')}"
+        ),
         "\n".join(plain),
         "<html><body>" + "".join(markup) + "</body></html>",
     )
+
+
+def send_payment_rejection_email(payment_id):
+    payment = Payment.objects.select_related(
+        "intent__registration__event",
+    ).filter(
+        pk=payment_id,
+        provider=Payment.Provider.UPI_MANUAL,
+        status=Payment.Status.REJECTED,
+    ).first()
+    if payment is None:
+        raise Payment.DoesNotExist
+    claimed = Payment.objects.filter(
+        pk=payment.pk,
+        rejection_email_status="PENDING",
+    ).update(
+        rejection_email_status="SENDING",
+        updated_at=timezone.now(),
+    )
+    if not claimed:
+        return payment.rejection_email_status or "FAILED"
+
+    registration = payment.intent.registration
+    subject = f"Action required for payment proof – {registration.ticket_id}"
+    registration_url = (
+        f"{settings.PAYU_FRONTEND_URL.rstrip('/')}/registration/success"
+        f"?registration_id={registration.pk}"
+        f"#token={payment.intent.proof_access_token}"
+        if settings.PAYU_FRONTEND_URL
+        else ""
+    )
+    deadline = (
+        timezone.localtime(payment.rejection_deadline).strftime("%d %b %Y, %I:%M %p")
+        if payment.rejection_deadline
+        else "within 12 hours"
+    )
+    text_content = "\n".join(
+        (
+            f"Hello {registration.buyer_name},",
+            "",
+            "Your payment proof could not be verified.",
+            f"Reason: {payment.rejection_reason}",
+            f"Please submit corrected payment proof by {deadline}.",
+            f"Ticket ID: {registration.ticket_id}",
+            *(("", f"Submit corrected proof here: {registration_url}") if registration_url else ()),
+        )
+    )
+    payload = {
+        "sender": {
+            "name": settings.BREVO_SENDER_NAME,
+            "email": settings.BREVO_SENDER_EMAIL,
+        },
+        "to": [{"email": registration.buyer_email, "name": registration.buyer_name}],
+        "subject": subject,
+        "textContent": text_content,
+        "tags": [f"payment-proof-rejection-{payment.id}"],
+    }
+    result = "FAILED"
+    try:
+        if not settings.BREVO_API_KEY or not settings.BREVO_SENDER_EMAIL:
+            raise BrevoConfigurationError(
+                "Configure BREVO_API_KEY and BREVO_SENDER_EMAIL before sending rejection email."
+            )
+        response = requests.post(
+            BREVO_SEND_URL,
+            headers={
+                "accept": "application/json",
+                "api-key": settings.BREVO_API_KEY,
+                "content-type": "application/json",
+            },
+            json=payload,
+            timeout=BREVO_REQUEST_TIMEOUT,
+        )
+        if 200 <= response.status_code < 300:
+            result = "SENT"
+        else:
+            logger.error(
+                "Brevo rejected payment-proof rejection email %s with HTTP %s.",
+                payment_id,
+                response.status_code,
+            )
+    except (requests.RequestException, BrevoConfigurationError):
+        logger.exception(
+            "Could not send payment-proof rejection email for payment %s.",
+            payment_id,
+        )
+    Payment.objects.filter(
+        pk=payment.pk,
+        rejection_email_status="SENDING",
+    ).update(rejection_email_status=result, updated_at=timezone.now())
+    return result
 
 
 def _release_reservation(

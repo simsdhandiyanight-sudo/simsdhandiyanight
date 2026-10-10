@@ -1,5 +1,6 @@
-from django.db.models import Count, Q
+from django.db.models import Count, OuterRef, Q, Subquery, Sum, Value
 from django.shortcuts import get_object_or_404
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_protect
@@ -9,12 +10,23 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsAdministrator
+from apps.registrations.models import InventoryReservation
 from apps.tickets.models import Ticket
 from .models import Event
 from .serializers import AdminEventSerializer, PublicEventSerializer, ordinal_day
 
 
 def public_events_queryset():
+    active_reserved_units = (
+        InventoryReservation.objects.filter(
+            event_id=OuterRef("pk"),
+            status=InventoryReservation.Status.RESERVED,
+        )
+        .filter(Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now()))
+        .values("event_id")
+        .annotate(total=Sum("units_reserved"))
+        .values("total")[:1]
+    )
     return (
         Event.objects.annotate(
             active_ticket_count=Count(
@@ -26,6 +38,10 @@ def public_events_queryset():
                 "registrations__tickets",
                 filter=Q(registrations__tickets__status=Ticket.Status.USED),
                 distinct=True,
+            ),
+            active_reserved_units=Coalesce(
+                Subquery(active_reserved_units),
+                Value(0),
             ),
         )
         .prefetch_related("tiers")

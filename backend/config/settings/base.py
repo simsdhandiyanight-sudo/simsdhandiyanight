@@ -10,6 +10,17 @@ REPOSITORY_ROOT = BASE_DIR.parent
 env_file = os.environ.get("ENV_FILE")
 load_dotenv(Path(env_file) if env_file else REPOSITORY_ROOT / ".env")
 
+
+def positive_integer_setting(name, default):
+    try:
+        value = int(os.environ.get(name, str(default)))
+    except ValueError as error:
+        raise ValueError(f"{name} must be a positive integer.") from error
+    if value < 1:
+        raise ValueError(f"{name} must be a positive integer.")
+    return value
+
+
 SECRET_KEY = os.environ.get("SECRET_KEY", "development-only-change-me")
 DEBUG = os.environ.get("DEBUG", "true").lower() == "true"
 render_hostname = os.environ.get("RENDER_EXTERNAL_HOSTNAME", "")
@@ -181,7 +192,11 @@ if DEBUG:
         for origin in LOCAL_DEV_ORIGINS
         if origin not in CORS_ALLOWED_ORIGINS
     )
-CORS_ALLOW_HEADERS = (*default_headers, "idempotency-key")
+CORS_ALLOW_HEADERS = (
+    *default_headers,
+    "idempotency-key",
+    "x-proof-access-token",
+)
 CORS_ALLOW_CREDENTIALS = True
 
 PAYU_MERCHANT_KEY = os.environ.get("PAYU_MERCHANT_KEY", "")
@@ -191,6 +206,20 @@ PAYU_SUCCESS_URL = os.environ.get("PAYU_SUCCESS_URL", "")
 PAYU_FAILURE_URL = os.environ.get("PAYU_FAILURE_URL", "")
 PAYU_WEBHOOK_URL = os.environ.get("PAYU_WEBHOOK_URL", "")
 PAYU_FRONTEND_URL = os.environ.get("PAYU_FRONTEND_URL", "")
+PAYMENT_UPI_ID = os.environ.get("PAYMENT_UPI_ID", "").strip()
+PAYMENT_UPI_QR_IMAGE_URL = os.environ.get("PAYMENT_UPI_QR_IMAGE_URL", "").strip()
+PAYMENT_PROOF_RESERVATION_HOURS = positive_integer_setting(
+    "PAYMENT_PROOF_RESERVATION_HOURS",
+    24,
+)
+PAYMENT_PROOF_RESUBMISSION_HOURS = positive_integer_setting(
+    "PAYMENT_PROOF_RESUBMISSION_HOURS",
+    12,
+)
+CLOUDINARY_CLOUD_NAME = os.environ.get("CLOUDINARY_CLOUD_NAME", "").strip()
+CLOUDINARY_API_KEY = os.environ.get("CLOUDINARY_API_KEY", "").strip()
+CLOUDINARY_API_SECRET = os.environ.get("CLOUDINARY_API_SECRET", "").strip()
+CLOUDINARY_PAYMENT_PROOF_FOLDER = "college-ticketing/payment-proofs"
 EMAIL_BACKEND = os.environ.get(
     "EMAIL_BACKEND",
     "django.core.mail.backends.smtp.EmailBackend",

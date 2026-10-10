@@ -70,6 +70,9 @@ const errorMessage = (status: number, data: unknown): { message: string; code: s
   return { message: `Request failed (${status}).`, code: 'REQUEST_ERROR' };
 };
 
+export const apiUrl = (path: string): string =>
+  `${API_BASE}${path.startsWith('/') ? path : `/${path}`}`;
+
 export async function apiRequest<T>(
   path: string,
   options: RequestInit = {},
@@ -77,7 +80,13 @@ export async function apiRequest<T>(
 ): Promise<T> {
   const method = (options.method || 'GET').toUpperCase();
   const headers = new Headers(options.headers);
-  if (options.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+  if (
+    options.body
+    && !(typeof FormData !== 'undefined' && options.body instanceof FormData)
+    && !headers.has('Content-Type')
+  ) {
+    headers.set('Content-Type', 'application/json');
+  }
   if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
     headers.set('X-CSRFToken', await ensureCsrfToken());
   }
@@ -102,8 +111,9 @@ export async function apiRequest<T>(
   return data as T;
 }
 
-export async function apiBlob(path: string): Promise<Blob> {
+export async function apiBlob(path: string, options: RequestInit = {}): Promise<Blob> {
   const response = await fetch(`${API_BASE}${path.startsWith('/') ? path : `/${path}`}`, {
+    ...options,
     credentials: 'include',
   });
   if (!response.ok) {

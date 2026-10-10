@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowRight, CheckCircle2, Download, Ticket as TicketIcon, Clock3 } from 'lucide-react';
+import { ArrowRight, CheckCircle2, Clock3, Download, Ticket as TicketIcon } from 'lucide-react';
 import { ApiError, apiBlob } from '../../api/http';
-import { paymentsApi } from '../../api/payments';
+import { paymentsApi, type PaymentProofStatusResponse } from '../../api/payments';
 import { mapRegistration, mapTicket } from '../../api/serializers';
 import { Navbar } from '../../components/common/Navbar';
 import { Footer } from '../../components/common/Footer';
@@ -10,47 +10,368 @@ import { FestivalMotifs } from '../../components/common/FestivalMotifs';
 import { DigitalTicket } from '../../components/ticket/DigitalTicket';
 import { Registration, Ticket } from '../../types';
 
-export const RegistrationSuccessPage: React.FC = () => {
+const ManualPaymentProofPage: React.FC<{
+  registrationId: string;
+  accessToken: string;
+}> = ({ registrationId, accessToken }) => {
+  const [details, setDetails] = useState<PaymentProofStatusResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [downloadError, setDownloadError] = useState('');
+  const [error, setError] = useState('');
+  const [utrReference, setUtrReference] = useState('');
+  const [transactionId, setTransactionId] = useState('');
+  const [screenshot, setScreenshot] = useState<File | null>(null);
+
+  const refresh = useCallback(async () => {
+    setError('');
+    try {
+      setDetails(await paymentsApi.proofStatus(registrationId, accessToken));
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : 'Unable to load your payment status.');
+    } finally {
+      setLoading(false);
+    }
+  }, [registrationId, accessToken]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  useEffect(() => {
+    if (
+      !details
+      || !(
+        details.payment_status === 'PENDING_VERIFICATION'
+        || (details.payment_status === 'VERIFIED' && details.email_status === 'PENDING')
+      )
+    ) {
+      return undefined;
+    }
+    const interval = window.setInterval(() => void refresh(), 15000);
+    return () => window.clearInterval(interval);
+  }, [details?.payment_status, details?.email_status, refresh]);
+
+  const submitProof = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!screenshot) {
+      setError('Please select your payment screenshot.');
+      return;
+    }
+    setSubmitting(true);
+    setError('');
+    try {
+      const result = await paymentsApi.submitProof(
+        registrationId,
+        accessToken,
+        utrReference.trim(),
+        transactionId.trim(),
+        screenshot,
+        crypto.randomUUID(),
+      );
+      setDetails(result);
+      setUtrReference('');
+      setTransactionId('');
+      setScreenshot(null);
+      const input = document.getElementById('payment-proof-screenshot') as HTMLInputElement | null;
+      if (input) input.value = '';
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : 'Unable to submit payment proof.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const downloadTicketId = async () => {
+    if (!details) return;
+    setDownloadError('');
+    try {
+      const file = await apiBlob(
+        paymentsApi.proofConfirmationUrl(registrationId),
+        { headers: { 'X-Proof-Access-Token': accessToken } },
+      );
+      const url = URL.createObjectURL(file);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `ticket-id-${details.ticket_id || details.registration_code}.pdf`;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (downloadFailure) {
+      setDownloadError(
+        downloadFailure instanceof Error
+          ? downloadFailure.message
+          : 'Ticket ID confirmation could not be downloaded.',
+      );
+    }
+  };
+
+  const paymentPending = details?.payment_status === 'PENDING_VERIFICATION';
+  const paymentRejected = details?.payment_status === 'REJECTED';
+  const paymentVerified = details?.payment_status === 'VERIFIED';
+  const canSubmitProof = details?.can_submit_proof === true;
+  const submitted = Boolean(details?.ticket_id);
+
+  return (
+    <div className="festival-public flex min-h-screen flex-col bg-slate-950 text-slate-100">
+      <Navbar />
+      <main className="festival-hero mx-auto w-full max-w-3xl flex-1 px-4 pb-24 pt-32 sm:px-6">
+        <FestivalMotifs />
+        {loading ? (
+          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-8 text-center text-sm text-slate-300">
+            Loading your secure payment page…
+          </div>
+        ) : !details ? (
+          <div role="alert" className="rounded-2xl border border-rose-800 bg-rose-950/40 p-6 text-sm text-rose-200">
+            {error || 'This registration link is invalid or unavailable.'}
+          </div>
+        ) : (
+          <div className="space-y-6">
+            <header className="rounded-2xl border border-slate-800 bg-slate-900 p-6 text-center sm:p-8">
+              <Clock3 className="mx-auto mb-4 h-10 w-10 text-amber-300" />
+              <p className="font-mono text-xs font-bold uppercase tracking-wider text-indigo-300">
+                {details.event_name}
+              </p>
+              <h1 className="mt-2 font-display text-2xl font-bold text-white">
+                {paymentPending
+                  ? 'Payment proof received'
+                  : paymentRejected
+                    ? 'Payment proof needs correction'
+                    : paymentVerified
+                      ? 'Payment verified'
+                      : 'Complete your UPI payment'}
+              </h1>
+              <p className="mt-2 text-sm text-slate-300">
+                Applicant: <strong>{details.applicant_name}</strong>
+              </p>
+              <p className="mt-1 text-sm text-slate-300">
+                Registered email: <strong>{details.applicant_email}</strong>
+              </p>
+              <p className="mt-3 text-2xl font-bold text-white">
+                {details.currency} {details.amount.toFixed(2)}
+              </p>
+              {submitted && (
+                <p className="mt-3 break-all font-mono text-sm font-bold text-indigo-300">
+                  Ticket ID: {details.ticket_id}
+                </p>
+              )}
+            </header>
+
+            {paymentPending && (
+              <section className="rounded-2xl border border-amber-300 bg-amber-50 p-6 text-sm leading-relaxed text-amber-950">
+                <p>
+                  Your payment proof has been submitted successfully. Your Ticket ID is{' '}
+                  <strong>{details.ticket_id}</strong>. Please save this ID for future reference.
+                  Your payment is awaiting admin verification. Your final admission ticket,
+                  including its QR code, will be sent to your registered email address after
+                  successful verification.
+                </p>
+                <p className="mt-3 text-xs text-amber-900">
+                  The Ticket ID is only a tracking/reference identifier. It does not confirm
+                  payment, guarantee admission, or authorize event entry.
+                </p>
+              </section>
+            )}
+
+            {paymentRejected && (
+              <section className="rounded-2xl border border-rose-800 bg-rose-950/30 p-6 text-sm text-rose-100">
+                <h2 className="font-semibold">Your proof was not approved</h2>
+                <p className="mt-2">Reason: {details.rejection_reason}</p>
+                {details.rejection_deadline && (
+                  <p className="mt-2 text-xs text-rose-200">
+                    Submit corrected proof before{' '}
+                    {new Date(details.rejection_deadline).toLocaleString()}.
+                  </p>
+                )}
+                <p className="mt-2 text-xs text-rose-200">
+                  Your existing Ticket ID remains the same. It is not an entry pass.
+                </p>
+              </section>
+            )}
+
+            {paymentVerified && (
+              <section className="rounded-2xl border border-emerald-800 bg-emerald-950/30 p-6 text-sm text-emerald-100">
+                <p>Payment verified. Email delivery status: {details.email_status || 'PENDING'}.</p>
+                {details.email_status === 'SENT' ? (
+                  <p className="mt-2">
+                    The email service accepted your final admission ticket for delivery to your
+                    registered email address. Present the QR code in that ticket for entry.
+                  </p>
+                ) : details.email_status === 'FAILED' ? (
+                  <p className="mt-2">
+                    Payment remains verified, but the email could not be sent. The event team can
+                    retry delivery without issuing another ticket.
+                  </p>
+                ) : (
+                  <p className="mt-2">
+                    Your final admission ticket is queued for delivery to your registered email
+                    address. Do not use the Ticket ID confirmation for entry.
+                  </p>
+                )}
+              </section>
+            )}
+
+            {!canSubmitProof
+              && !paymentPending
+              && !paymentRejected
+              && !paymentVerified
+              && details.registration_status === 'EXPIRED' && (
+                <section className="rounded-2xl border border-rose-800 bg-rose-950/30 p-6 text-sm text-rose-100">
+                  This reservation has expired and the inventory was released. Please start a new
+                  registration if tickets are still available.
+                  <Link to="/register" className="mt-4 inline-flex rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white">
+                    Start a new registration
+                  </Link>
+                </section>
+              )}
+
+            {canSubmitProof && (
+              <section className="grid gap-6 rounded-2xl border border-slate-800 bg-slate-900 p-6 md:grid-cols-2">
+                <div className="space-y-3">
+                  <h2 className="text-lg font-semibold text-white">Pay by UPI</h2>
+                  <p className="text-sm text-slate-300">
+                    Scan this QR code and pay the exact amount displayed for your pass.
+                  </p>
+                  <img
+                    src={details.upi_qr_image_url}
+                    alt="Configured UPI payment QR code"
+                    className="mx-auto max-h-64 rounded-xl bg-white p-2"
+                  />
+                  <p className="text-xs text-slate-400">
+                    Your reservation expires at{' '}
+                    {details.reservation_expires_at
+                      ? new Date(details.reservation_expires_at).toLocaleString()
+                      : 'the displayed deadline'}.
+                  </p>
+                </div>
+
+                <form className="space-y-4" onSubmit={submitProof}>
+                  <h2 className="text-lg font-semibold text-white">Submit payment proof</h2>
+                  <label className="block text-sm text-slate-300" htmlFor="payment-utr">
+                    UTR
+                  </label>
+                  <input
+                    id="payment-utr"
+                    required
+                    minLength={6}
+                    maxLength={40}
+                    value={utrReference}
+                    onChange={(event) => setUtrReference(event.target.value)}
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white"
+                  />
+                  <label className="block text-sm text-slate-300" htmlFor="payment-transaction-id">
+                    Transaction ID
+                  </label>
+                  <input
+                    id="payment-transaction-id"
+                    required
+                    minLength={6}
+                    maxLength={40}
+                    value={transactionId}
+                    onChange={(event) => setTransactionId(event.target.value)}
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white"
+                  />
+                  <label className="block text-sm text-slate-300" htmlFor="payment-proof-screenshot">
+                    Payment screenshot (JPEG, PNG, or WebP; max 5 MB)
+                  </label>
+                  <input
+                    id="payment-proof-screenshot"
+                    type="file"
+                    required
+                    accept="image/jpeg,image/png,image/webp"
+                    onChange={(event) => setScreenshot(event.target.files?.[0] || null)}
+                    className="block w-full text-xs text-slate-300 file:mr-3 file:rounded-lg file:border-0 file:bg-indigo-600 file:px-3 file:py-2 file:text-white"
+                  />
+                  <p className="text-xs text-slate-400">
+                    Payment is not confirmed by uploading a screenshot. An administrator checks
+                    the actual transaction before issuing your final ticket.
+                  </p>
+                  {error && <p role="alert" className="text-sm text-rose-300">{error}</p>}
+                  <button
+                    type="submit"
+                    disabled={submitting || !screenshot}
+                    className="w-full rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white hover:bg-indigo-500 disabled:cursor-wait disabled:opacity-50"
+                  >
+                    {submitting
+                      ? 'Submitting proof…'
+                      : paymentRejected
+                        ? 'Submit corrected proof'
+                        : 'Submit payment proof'}
+                  </button>
+                </form>
+              </section>
+            )}
+
+            {submitted && (
+              <section className="space-y-3">
+                <button
+                  type="button"
+                  onClick={() => void downloadTicketId()}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl border border-indigo-500/40 bg-indigo-600/20 px-4 py-3 text-sm font-semibold text-indigo-100 hover:bg-indigo-600/30"
+                >
+                  <Download className="h-4 w-4" />
+                  Download Ticket ID
+                </button>
+                {downloadError && (
+                  <p role="alert" className="text-center text-xs text-rose-300">{downloadError}</p>
+                )}
+              </section>
+            )}
+
+            {error && !canSubmitProof && (
+              <p role="alert" className="rounded-xl border border-rose-800 bg-rose-950/40 p-3 text-sm text-rose-200">
+                {error}
+              </p>
+            )}
+            <button
+              type="button"
+              onClick={() => void refresh()}
+              className="mx-auto block rounded-lg border border-slate-700 px-4 py-2 text-xs text-slate-300 hover:bg-slate-800"
+            >
+              Refresh payment status
+            </button>
+          </div>
+        )}
+      </main>
+      <Footer />
+    </div>
+  );
+};
+
+const PayURegistrationSuccessPage: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const [isDownloadingBundle, setIsDownloadingBundle] = useState(false);
-  const [bundleDownloadError, setBundleDownloadError] = useState('');
-  const [paymentStatus, setPaymentStatus] = useState<'loading' | 'pending' | 'failed' | 'review' | 'error'>('loading');
-  const [statusMessage, setStatusMessage] = useState('');
-  const state = location.state as { registration?: Registration; ticket?: Ticket; tickets?: Ticket[] } | undefined;
+  const state = location.state as {
+    registration?: Registration;
+    ticket?: Ticket;
+    tickets?: Ticket[];
+  } | undefined;
   const registration = state?.registration;
   const ticket = state?.ticket;
   const tickets = state?.tickets ?? (ticket ? [ticket] : []);
   const txnid = searchParams.get('txnid') || '';
+  const [paymentMessage, setPaymentMessage] = useState(
+    'Payment is still being confirmed by PayU. No final ticket is available yet.',
+  );
 
   useEffect(() => {
     if (!txnid || registration) return;
     let active = true;
     let refreshing = false;
-    let terminal = false;
     const refresh = async () => {
-      if (refreshing || terminal) return;
+      if (refreshing) return;
       refreshing = true;
       try {
         const idempotencyKey = sessionStorage.getItem(
           `ticketing.payment-idempotency.${txnid}`,
         );
         if (!idempotencyKey) {
-          terminal = true;
-          setPaymentStatus('error');
-          setStatusMessage('This browser session cannot access the payment confirmation. Return using the same browser session or contact the event team.');
+          setPaymentMessage('This payment cannot be verified in this browser session. Contact the event team.');
           return;
         }
         const payment = await paymentsApi.status(txnid, idempotencyKey);
         if (!active) return;
         if (payment.payment_verified && payment.registration && payment.tickets) {
-          const storageKey = sessionStorage.getItem(
-            `ticketing.payment-idempotency-storage.${txnid}`,
-          );
-          if (storageKey) sessionStorage.removeItem(storageKey);
-          sessionStorage.removeItem(`ticketing.payment-idempotency.${txnid}`);
-          sessionStorage.removeItem(`ticketing.payment-idempotency-storage.${txnid}`);
           const confirmedTickets = payment.tickets.map(mapTicket);
           navigate('/registration/success', {
             replace: true,
@@ -60,32 +381,21 @@ export const RegistrationSuccessPage: React.FC = () => {
               tickets: confirmedTickets,
             },
           });
-          return;
-        }
-        if (payment.payment_status === 'FAILED') {
-          terminal = true;
-          sessionStorage.removeItem(`ticketing.payment-idempotency.${txnid}`);
-          sessionStorage.removeItem(`ticketing.payment-idempotency-storage.${txnid}`);
-          setPaymentStatus('failed');
-          setStatusMessage('PayU reported that this payment failed or was cancelled. No tickets have been issued.');
-        } else if (payment.ticket_issuance_status === 'ADMIN_REVIEW_REQUIRED') {
-          terminal = true;
-          setPaymentStatus('review');
-          setStatusMessage(payment.verification_message || 'Payment requires administrator review. Do not pay again; contact event support with your transaction reference.');
+        } else if (payment.payment_status === 'FAILED') {
+          setPaymentMessage('PayU reported that this payment failed or was cancelled. No tickets have been issued.');
         } else {
-          setPaymentStatus('pending');
-          setStatusMessage('Payment is still being confirmed by PayU. This page will check again shortly; do not retry payment while it is processing.');
+          setPaymentMessage(
+            payment.verification_message
+              || 'Payment is still being confirmed. Do not pay again while it is processing.',
+          );
         }
       } catch (error) {
         if (!active) return;
-        if (error instanceof ApiError && error.code === 'PAYMENT_REVIEW_REQUIRED') {
-          terminal = true;
-          setPaymentStatus('review');
-          setStatusMessage(error.message);
-          return;
-        }
-        setPaymentStatus('error');
-        setStatusMessage(error instanceof Error ? error.message : 'Payment status could not be checked.');
+        setPaymentMessage(
+          error instanceof ApiError
+            ? error.message
+            : 'Payment status could not be checked. Please try again.',
+        );
       } finally {
         refreshing = false;
       }
@@ -98,168 +408,67 @@ export const RegistrationSuccessPage: React.FC = () => {
     };
   }, [txnid, registration, navigate]);
 
-  const downloadAllTickets = async () => {
-    setIsDownloadingBundle(true);
-    setBundleDownloadError('');
-    try {
-      if (!registration) throw new Error('Registration details are unavailable.');
-      const pdf = await apiBlob(
-        `/registrations/${encodeURIComponent(registration.id)}/tickets.pdf`,
-      );
-      const url = URL.createObjectURL(pdf);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `tickets-${registration.registrationCode || registration.id}.pdf`;
-      link.click();
-      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-    } catch (error) {
-      console.error('Failed to generate combo ticket PDF.', error);
-      setBundleDownloadError('Tickets could not be downloaded. Please try again.');
-    } finally {
-      setIsDownloadingBundle(false);
-    }
-  };
-
   return (
     <div className="festival-public flex min-h-screen flex-col bg-slate-950 text-slate-100">
       <Navbar />
-
       <main className="festival-hero mx-auto w-full max-w-4xl flex-1 px-4 pb-24 pt-32 sm:px-6">
         <FestivalMotifs />
         {registration && ticket ? (
           <>
-            <div className="mb-10 space-y-4 text-center">
-              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl border border-emerald-500/40 bg-emerald-500/20 text-emerald-400 shadow-lg shadow-emerald-500/10">
-                <CheckCircle2 className="h-8 w-8" />
-              </div>
-              <div className="space-y-2">
-                <p className="font-mono text-xs font-bold uppercase tracking-wider text-emerald-400">
-                  Soundarya · Dhandiya Night
-                </p>
-                <h1 className="font-display text-3xl font-extrabold tracking-tight text-white sm:text-4xl">
-                  Registration confirmed
-                </h1>
-                <p className="mx-auto max-w-md text-sm leading-relaxed text-slate-400">
-                  {tickets.length === 1
-                    ? 'Your payment is verified and your ticket is ready.'
-                    : `Your payment is verified and all ${tickets.length} tickets are ready.`}
-                  {' '}Keep the QR code available for entry.
-                </p>
-              </div>
-              <div className="inline-flex max-w-full flex-wrap items-center justify-center gap-x-3 gap-y-1 rounded-xl border border-slate-800 bg-slate-900 px-4 py-2 font-mono text-xs text-slate-300">
-                <span className="text-slate-500">REGISTRATION ID:</span>
-                <span className="break-all font-bold text-indigo-400">
-                  {registration.registrationCode || registration.id}
-                </span>
-              </div>
-            </div>
-
-            <div className="mb-12 space-y-8">
-              {tickets.map((issuedTicket, index) => (
-                <section key={issuedTicket.id} aria-label={`Admission ${index + 1} of ${tickets.length}`}>
-                  {tickets.length > 1 && (
-                    <h2 className="mb-3 text-center text-sm font-semibold text-slate-300">
-                      Admission {index + 1} of {tickets.length}
-                    </h2>
-                  )}
-                  <DigitalTicket
-                    ticket={issuedTicket}
-                    showActions
-                  />
-                </section>
+            <header className="mb-8 text-center">
+              <CheckCircle2 className="mx-auto mb-4 h-12 w-12 text-emerald-400" />
+              <h1 className="font-display text-3xl font-bold text-white">Registration confirmed</h1>
+              <p className="mt-2 text-sm text-slate-300">Payment verified. Present the final ticket QR code at entry.</p>
+              <p className="mt-3 font-mono text-xs text-slate-400">
+                Registration: {registration.registrationCode || registration.id}
+              </p>
+            </header>
+            <div className="space-y-8">
+              {tickets.map((issuedTicket) => (
+                <DigitalTicket key={issuedTicket.id} ticket={issuedTicket} showActions />
               ))}
-            </div>
-
-            {tickets.length > 1 && (
-              <div className="mx-auto mb-6 max-w-md">
-                <button
-                  type="button"
-                  onClick={() => void downloadAllTickets()}
-                  disabled={isDownloadingBundle}
-                  aria-busy={isDownloadingBundle}
-                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-rose-700 to-fuchsia-700 px-4 py-3 text-sm font-semibold text-white shadow-md transition-colors hover:from-rose-800 hover:to-fuchsia-800 disabled:cursor-wait disabled:opacity-60"
-                >
-                  <Download className="h-4 w-4" />
-                  <span>{isDownloadingBundle ? 'Preparing all tickets…' : `Download all ${tickets.length} tickets (PDF)`}</span>
-                </button>
-                {bundleDownloadError && (
-                  <p role="alert" className="mt-2 text-center text-xs text-rose-700">
-                    {bundleDownloadError}
-                  </p>
-                )}
-              </div>
-            )}
-
-            <div className="mx-auto grid max-w-md grid-cols-1 gap-3 border-t border-slate-800 pt-6 sm:grid-cols-2">
-              <Link
-                to={`/ticket/${ticket.id}`}
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-3 text-xs font-semibold text-white shadow-md transition-colors hover:bg-indigo-500"
-              >
-                <TicketIcon className="h-4 w-4" />
-                <span>Full pass view</span>
-              </Link>
-              <Link
-                to="/events"
-                className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-800 bg-slate-900 px-4 py-3 text-xs font-semibold text-slate-300 transition-colors hover:bg-slate-800 hover:text-white"
-              >
-                <span>Back to Dhandiya Night</span>
-                <ArrowRight className="h-4 w-4" />
-              </Link>
             </div>
           </>
         ) : txnid ? (
-          <div className="mx-auto max-w-lg rounded-2xl border border-slate-800 bg-slate-900 p-8 text-center">
-            {paymentStatus === 'failed' ? (
-              <TicketIcon className="mx-auto mb-4 h-10 w-10 text-rose-300" />
-            ) : paymentStatus === 'pending' || paymentStatus === 'review' ? (
-              <Clock3 className="mx-auto mb-4 h-10 w-10 text-amber-300" />
-            ) : (
-              <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-indigo-400 border-t-transparent" role="status" aria-label="Checking payment" />
-            )}
-            <h1 className="font-display text-2xl font-bold text-white">
-              {paymentStatus === 'failed'
-                ? 'Payment not completed'
-                : paymentStatus === 'review'
-                  ? 'Payment needs review'
-                  : 'Confirming your payment'}
-            </h1>
-            <p role="status" className="mt-2 text-sm leading-relaxed text-slate-400">
-              {statusMessage || 'Checking the payment status securely with PayU…'}
-            </p>
+          <section className="mx-auto max-w-lg rounded-2xl border border-slate-800 bg-slate-900 p-8 text-center">
+            <Clock3 className="mx-auto mb-4 h-10 w-10 text-amber-300" />
+            <h1 className="font-display text-2xl font-bold text-white">Payment confirmation</h1>
+            <p role="status" className="mt-3 text-sm leading-relaxed text-slate-300">{paymentMessage}</p>
             <p className="mt-4 break-all font-mono text-xs text-slate-500">Transaction: {txnid}</p>
-            {paymentStatus === 'failed' && (
-              <Link
-                to="/register"
-                className="mt-6 inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-indigo-500"
-              >
-                Try again <ArrowRight className="h-4 w-4" />
-              </Link>
-            )}
-            <Link
-              to="/events"
-              className="mt-6 ml-3 inline-flex items-center justify-center gap-2 rounded-xl border border-slate-700 px-5 py-3 text-sm font-semibold text-slate-300 transition-colors hover:bg-slate-800"
-            >
-              Back to Dhandiya Night
-            </Link>
-          </div>
+          </section>
         ) : (
-          <div className="mx-auto max-w-lg rounded-2xl border border-slate-800 bg-slate-900 p-8 text-center">
+          <section className="mx-auto max-w-lg rounded-2xl border border-slate-800 bg-slate-900 p-8 text-center">
             <TicketIcon className="mx-auto mb-4 h-10 w-10 text-indigo-300" />
             <h1 className="font-display text-2xl font-bold text-white">No registration confirmation found</h1>
             <p className="mt-2 text-sm leading-relaxed text-slate-400">
-              This confirmation page needs the registration details from this browser session. Return to Dhandiya Night to start a demo registration.
+              Use the secure payment link from your registration to view status and submit proof.
             </p>
             <Link
               to="/events"
-              className="mt-6 inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-indigo-500"
+              className="mt-6 inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-500"
             >
-              Dhandiya Night <ArrowRight className="h-4 w-4" />
+              Back to Dhandiya Night <ArrowRight className="h-4 w-4" />
             </Link>
-          </div>
+          </section>
         )}
       </main>
-
       <Footer />
     </div>
   );
+};
+
+export const RegistrationSuccessPage: React.FC = () => {
+  const [searchParams] = useSearchParams();
+  const location = useLocation();
+  const registrationId = searchParams.get('registration_id');
+  const accessToken = new URLSearchParams(location.hash.slice(1)).get('token');
+  if (registrationId && accessToken) {
+    return (
+      <ManualPaymentProofPage
+        registrationId={registrationId}
+        accessToken={accessToken}
+      />
+    );
+  }
+  return <PayURegistrationSuccessPage />;
 };

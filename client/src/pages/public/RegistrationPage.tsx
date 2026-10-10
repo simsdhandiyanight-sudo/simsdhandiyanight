@@ -2,11 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { eventsApi, FEATURED_EVENT_SLUG } from '../../api/events';
 import { paymentsApi } from '../../api/payments';
-import {
-  clearRegistrationIdempotencyKey,
-  registrationIdempotencyStorageKey,
-} from '../../api/registrations';
-import { mapRegistration, mapTicket } from '../../api/serializers';
+import { clearRegistrationIdempotencyKey } from '../../api/registrations';
 import { EventItem } from '../../types';
 import { Navbar } from '../../components/common/Navbar';
 import { Footer } from '../../components/common/Footer';
@@ -216,63 +212,11 @@ export const RegistrationPage: React.FC = () => {
             ? [fullName, ...attendeeNames.slice(0, selectedAdmissionCount - 1)]
             : [fullName],
       };
-      const order = await paymentsApi.createOrder(registrationParams);
-
-      const showVerifiedRegistration = async (data: {
-        registration: Parameters<typeof mapRegistration>[0];
-        ticket?: Parameters<typeof mapTicket>[0];
-        tickets: Parameters<typeof mapTicket>[0][];
-      }) => {
-        const tickets = data.tickets.map(mapTicket);
-        const registration = mapRegistration(data.registration);
-        navigate('/registration/success', {
-          state: {
-            registration,
-            ticket: tickets[0] ?? (data.ticket ? mapTicket(data.ticket) : undefined),
-            tickets,
-          },
-        });
-      };
-
-      const existingRegistration = order.registration;
-      const existingTickets = order.tickets;
-      if (order.payment_verified && existingRegistration && existingTickets) {
-        await clearRegistrationIdempotencyKey(registrationParams);
-        await showVerifiedRegistration({
-          registration: existingRegistration,
-          ticket: order.ticket,
-          tickets: existingTickets,
-        });
-        return;
-      }
-      if (!order.checkout_url || !order.payment_params || !order.order_id) {
-        throw new Error('Payment is not configured for this event right now. Please try again later.');
-      }
-
-      const idempotencyStorageKey =
-        await registrationIdempotencyStorageKey(registrationParams);
-      sessionStorage.setItem(
-        `ticketing.payment-idempotency.${order.order_id}`,
-        order.idempotency_key,
+      const reservation = await paymentsApi.startProofRegistration(registrationParams);
+      await clearRegistrationIdempotencyKey(registrationParams);
+      navigate(
+        `/registration/success?registration_id=${encodeURIComponent(reservation.registration_id)}#token=${encodeURIComponent(reservation.proof_access_token)}`,
       );
-      sessionStorage.setItem(
-        `ticketing.payment-idempotency-storage.${order.order_id}`,
-        idempotencyStorageKey,
-      );
-      const form = document.createElement('form');
-      form.method = 'POST';
-      form.action = order.checkout_url;
-      form.acceptCharset = 'UTF-8';
-      form.hidden = true;
-      Object.entries(order.payment_params).forEach(([name, value]) => {
-        const input = document.createElement('input');
-        input.type = 'hidden';
-        input.name = name;
-        input.value = value;
-        form.appendChild(input);
-      });
-      document.body.appendChild(form);
-      form.submit();
     } catch (err: unknown) {
       setErrorMessage(err instanceof Error ? err.message : 'Registration failed. Please try again.');
       submittingRef.current = false;
@@ -638,7 +582,7 @@ export const RegistrationPage: React.FC = () => {
             <div>
               <h2 className="text-lg font-bold font-display text-white">Review &amp; Finalize</h2>
               <p className="text-xs text-slate-400 mt-0.5">
-                Confirm your registration details before issuing the digital ticket.
+                Confirm your registration details, then pay by UPI and submit payment proof.
               </p>
             </div>
 
@@ -764,12 +708,12 @@ export const RegistrationPage: React.FC = () => {
                 {isSubmitting ? (
                   <>
                     <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    <span>Opening Secure Checkout...</span>
+                    <span>Preparing UPI payment...</span>
                   </>
                 ) : (
                   <>
                     <CheckCircle2 className="w-4 h-4" />
-                    <span>PAY &amp; ISSUE PASS</span>
+                    <span>Continue to UPI payment</span>
                   </>
                 )}
               </button>
