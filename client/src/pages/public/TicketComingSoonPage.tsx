@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 
-const RELEASE_TIME = new Date('2026-10-10T02:57:00+05:30').getTime();
+const RELEASE_TIME = new Date('2026-10-10T12:00:00+05:30').getTime();
 
 export const TicketComingSoonPage: React.FC = () => {
   const [now, setNow] = useState(Date.now());
