@@ -232,8 +232,8 @@ const ManualPaymentProofPage: React.FC<{
                     Scan this QR code and pay the exact amount displayed for your pass.
                   </p>
                   <img
-                    src={details.upi_qr_image_url}
-                    alt="Configured UPI payment QR code"
+                    src="/upi-payment-qr.jpeg"
+                    alt="UPI payment QR code"
                     className="mx-auto max-h-64 rounded-xl bg-white p-2"
                   />
                   <p className="text-xs text-slate-400">

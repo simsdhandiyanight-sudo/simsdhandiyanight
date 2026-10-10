@@ -2,7 +2,6 @@ import hashlib
 import logging
 import uuid
 from datetime import timedelta
-from urllib.parse import urlsplit
 
 from django.conf import settings
 from django.db import IntegrityError, transaction
@@ -48,34 +47,6 @@ class PaymentProofConflict(APIException):
     default_code = "PAYMENT_PROOF_CONFLICT"
 
 
-class PaymentInstructionsUnavailable(APIException):
-    status_code = 503
-    default_detail = (
-        "UPI payment instructions are not configured. Please contact the event team."
-    )
-    default_code = "PAYMENT_INSTRUCTIONS_UNAVAILABLE"
-
-
-def _validate_payment_instructions():
-    upi_id = settings.PAYMENT_UPI_ID
-    qr_url = settings.PAYMENT_UPI_QR_IMAGE_URL
-    parsed_qr_url = urlsplit(qr_url)
-    valid_upi = bool(
-        "@" in upi_id
-        and 3 <= len(upi_id) <= 256
-        and all(character.isalnum() or character in "._+-@" for character in upi_id)
-    )
-    valid_qr_url = (
-        parsed_qr_url.scheme == "https" and bool(parsed_qr_url.netloc)
-    ) or (
-        settings.DEBUG
-        and parsed_qr_url.scheme == "http"
-        and parsed_qr_url.hostname in ("localhost", "127.0.0.1")
-    )
-    if not valid_upi or not valid_qr_url or parsed_qr_url.username:
-        raise PaymentInstructionsUnavailable()
-
-
 def validate_payment_proof_image(upload):
     if upload is None or upload.size <= 0:
         raise ValidationError({"screenshot": "A non-empty payment screenshot is required."})
@@ -103,10 +74,7 @@ def validate_payment_proof_image(upload):
 
 
 def _payment_instructions(tier):
-    _validate_payment_instructions()
     return {
-        "upi_id": settings.PAYMENT_UPI_ID,
-        "upi_qr_image_url": settings.PAYMENT_UPI_QR_IMAGE_URL,
         "amount": float(tier.price),
         "currency": tier.currency,
         "reservation_hours": settings.PAYMENT_PROOF_RESERVATION_HOURS,
@@ -121,7 +89,6 @@ def start_payment_proof_registration(
     buyer,
     attendee_names,
 ):
-    _validate_payment_instructions()
     registration, intent, created = create_reserved_registration(
         idempotency_key=idempotency_key,
         event_id=event_id,

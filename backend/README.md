@@ -117,11 +117,10 @@ unreferenced authenticated assets at least seven days old. Referenced proofs,
 including rejected submissions, are retained for reconciliation and disputes;
 apply an explicit retention policy before deleting them.
 
-Online registration uses manual UPI payment proof: configure
-`PAYMENT_UPI_ID` and `PAYMENT_UPI_QR_IMAGE_URL` on the Render web service before
-opening registration. The QR URL must be HTTPS in production and point to the
-static UPI QR image for the configured VPA. Set
-`PAYMENT_PROOF_RESERVATION_HOURS` (default 24) and
+Online registration uses manual UPI payment proof. The payment QR image is
+served by the frontend from `client/public/upi-payment-qr.jpeg`; no UPI ID or
+QR URL environment variables are required. Replace that frontend image when
+the payment QR changes. Set `PAYMENT_PROOF_RESERVATION_HOURS` (default 24) and
 `PAYMENT_PROOF_RESUBMISSION_HOURS` (default 12) to the reservation windows.
 Uploaded JPEG/PNG/WebP proof images are capped at 5 MB and stored in the
 private Cloudinary assets (not in PostgreSQL or the ephemeral Render

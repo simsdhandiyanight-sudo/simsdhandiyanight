@@ -48,8 +48,6 @@ export interface PaymentProofRegistrationResponse {
   payment_status: string;
   reservation_expires_at: string | null;
   rejection_deadline: string | null;
-  upi_id: string;
-  upi_qr_image_url: string;
   amount: number;
   currency: string;
   reservation_hours: number;

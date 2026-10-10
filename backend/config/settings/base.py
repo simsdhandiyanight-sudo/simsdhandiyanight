@@ -206,8 +206,6 @@ PAYU_SUCCESS_URL = os.environ.get("PAYU_SUCCESS_URL", "")
 PAYU_FAILURE_URL = os.environ.get("PAYU_FAILURE_URL", "")
 PAYU_WEBHOOK_URL = os.environ.get("PAYU_WEBHOOK_URL", "")
 PAYU_FRONTEND_URL = os.environ.get("PAYU_FRONTEND_URL", "")
-PAYMENT_UPI_ID = os.environ.get("PAYMENT_UPI_ID", "").strip()
-PAYMENT_UPI_QR_IMAGE_URL = os.environ.get("PAYMENT_UPI_QR_IMAGE_URL", "").strip()
 PAYMENT_PROOF_RESERVATION_HOURS = positive_integer_setting(
     "PAYMENT_PROOF_RESERVATION_HOURS",
     24,

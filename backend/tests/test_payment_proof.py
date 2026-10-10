@@ -37,8 +37,6 @@ PNG_IMAGE = base64.b64decode(
 
 
 @override_settings(
-    PAYMENT_UPI_ID="soundarya@example",
-    PAYMENT_UPI_QR_IMAGE_URL="https://payments.example.test/soundarya.png",
     PAYMENT_PROOF_RESERVATION_HOURS=24,
     PAYMENT_PROOF_RESUBMISSION_HOURS=12,
     BREVO_API_KEY="",
@@ -118,6 +116,8 @@ class ManualPaymentProofTests(TestCase):
             HTTP_IDEMPOTENCY_KEY=str(uuid.uuid4()),
         )
         self.assertEqual(response.status_code, 201, response.data)
+        self.assertNotIn("upi_id", response.data)
+        self.assertNotIn("upi_qr_image_url", response.data)
         return response.data
 
     def submit_proof(
