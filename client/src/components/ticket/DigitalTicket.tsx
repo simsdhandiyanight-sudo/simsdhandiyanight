@@ -144,6 +144,18 @@ export const DigitalTicket: React.FC<DigitalTicketProps> = ({ ticket, showAction
             </div>
           </div>
 
+          <section
+            aria-label="Arrival information and ticket terms"
+            className="rounded-xl border border-amber-700/40 bg-amber-50/95 p-3.5 text-xs text-[#49340f]"
+          >
+            <h3 className="font-bold uppercase tracking-wide text-amber-900">Arrival &amp; terms</h3>
+            <p className="mt-1">
+              Report to the venue at least 1 hour before the event starts. A valid ticket/QR code
+              and ID are required. Tickets are non-transferable and non-refundable; venue rules
+              must be followed.
+            </p>
+          </section>
+
           {/* Attendee Info Card */}
           <div className="flex items-center justify-between p-3.5 bg-slate-950/40 rounded-xl border border-slate-800/50">
             <div>
@@ -157,7 +169,9 @@ export const DigitalTicket: React.FC<DigitalTicketProps> = ({ ticket, showAction
               <p className="text-[10px] text-slate-500 uppercase font-semibold tracking-wider">
                 REGISTRATION ID
               </p>
-              <p className="text-xs font-mono text-indigo-300 font-semibold">{ticket.registrationId}</p>
+              <p className="text-xs font-mono text-indigo-300 font-semibold">
+                {ticket.registrationCode || ticket.registrationId}
+              </p>
             </div>
           </div>
         </div>
@@ -179,19 +193,16 @@ export const DigitalTicket: React.FC<DigitalTicketProps> = ({ ticket, showAction
 
           <div className="w-full text-center space-y-1">
             <div className="inline-flex items-center gap-2 px-3 py-1 bg-slate-950 rounded-lg border border-slate-800 text-xs font-mono text-slate-300">
-              <span>{ticket.id}</span>
+              <span>{ticket.ticketCode || ticket.id}</span>
               <button
-                onClick={() => void handleCopy(ticket.id, 'Ticket ID')}
+                onClick={() => void handleCopy(ticket.ticketCode || ticket.id, 'Ticket ID')}
                 className="hover:text-indigo-400 transition-colors cursor-pointer"
                 title="Copy Ticket ID"
                 aria-label="Copy ticket ID"
               >
-                {copiedValue === ticket.id ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                {copiedValue === (ticket.ticketCode || ticket.id) ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
               </button>
             </div>
-            <p className="text-[11px] text-slate-500">
-              Prototype ticket • local demo status, not server-validated
-            </p>
             <button
               type="button"
               onClick={() => void handleCopy(ticket.qrToken, 'Scan token')}

@@ -3,7 +3,7 @@ import json
 
 from django.db import IntegrityError, transaction
 from rest_framework.exceptions import APIException, ValidationError
-from django.db.models import Sum
+from django.db.models import Q, Sum
 from django.utils import timezone
 
 from apps.events.models import Event, TicketTier
@@ -66,8 +66,12 @@ def create_registration(
 
     reservations = PaymentIntent.objects.filter(
         event=event,
-        status=PaymentIntent.Status.PENDING,
-        expires_at__gt=timezone.now(),
+    ).filter(
+        Q(
+            status=PaymentIntent.Status.PENDING,
+            expires_at__gt=timezone.now(),
+        )
+        | Q(status=PaymentIntent.Status.REVIEW_REQUIRED)
     )
     if exclude_payment_intent_id is not None:
         reservations = reservations.exclude(pk=exclude_payment_intent_id)
@@ -89,8 +93,12 @@ def create_registration(
         created_by=created_by,
     )
     tickets = [
-        Ticket(registration=registration, attendee_name=attendee_name)
-        for attendee_name in names
+        Ticket(
+            registration=registration,
+            ticket_code=f"{registration.registration_code}-T{index:02d}",
+            attendee_name=attendee_name,
+        )
+        for index, attendee_name in enumerate(names, start=1)
     ]
     Ticket.objects.bulk_create(tickets)
     from apps.payments.delivery import ensure_ticket_deliveries

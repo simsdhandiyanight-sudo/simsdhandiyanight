@@ -29,9 +29,19 @@ services:
         value: "true"
       - key: CSRF_COOKIE_SAMESITE
         value: "None"
-      - key: RAZORPAY_KEY_ID
+      - key: PAYU_MERCHANT_KEY
         sync: false
-      - key: RAZORPAY_KEY_SECRET
+      - key: PAYU_MERCHANT_SALT
+        sync: false
+      - key: PAYU_ENVIRONMENT
+        value: test
+      - key: PAYU_SUCCESS_URL
+        sync: false
+      - key: PAYU_FAILURE_URL
+        sync: false
+      - key: PAYU_WEBHOOK_URL
+        sync: false
+      - key: PAYU_FRONTEND_URL
         sync: false
       - key: BREVO_API_KEY
         sync: false

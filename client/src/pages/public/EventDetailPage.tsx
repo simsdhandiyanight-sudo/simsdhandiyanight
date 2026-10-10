@@ -110,7 +110,7 @@ export const EventDetailPage: React.FC = () => {
                 <div className="flex flex-wrap items-center gap-4 pt-2">
                   {registrationAvailable ? (
                     <Link
-                      to={`/register/${event.slug}`}
+                      to="/register"
                       className="px-8 py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold text-sm tracking-wide shadow-lg shadow-indigo-600/30 transition-all hover:translate-y-[-1px] inline-flex items-center gap-2 uppercase"
                     >
                       <span>Reserve your pass</span>
@@ -283,7 +283,7 @@ export const EventDetailPage: React.FC = () => {
                           </span>
                           {registrationAvailable && tier.available > 0 && (
                             <Link
-                              to={`/register/${event.slug}?tier=${tier.id}`}
+                              to={`/register?tier=${tier.id}`}
                               className="text-indigo-400 hover:text-indigo-300 font-semibold"
                             >
                               Select Tier &rarr;
@@ -296,7 +296,7 @@ export const EventDetailPage: React.FC = () => {
 
                   {registrationAvailable && (
                     <Link
-                      to={`/register/${event.slug}`}
+                      to="/register"
                       className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-md shadow-indigo-600/30 transition-all"
                     >
                       <span>REGISTER NOW</span>

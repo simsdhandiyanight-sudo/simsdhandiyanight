@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
-import { ArrowRight, CheckCircle2, Download, Ticket as TicketIcon } from 'lucide-react';
-import { apiBlob } from '../../api/http';
+import React, { useEffect, useState } from 'react';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { ArrowRight, CheckCircle2, Download, Ticket as TicketIcon, Clock3 } from 'lucide-react';
+import { ApiError, apiBlob } from '../../api/http';
+import { paymentsApi } from '../../api/payments';
+import { mapRegistration, mapTicket } from '../../api/serializers';
 import { Navbar } from '../../components/common/Navbar';
 import { Footer } from '../../components/common/Footer';
 import { FestivalMotifs } from '../../components/common/FestivalMotifs';
@@ -10,12 +12,91 @@ import { Registration, Ticket } from '../../types';
 
 export const RegistrationSuccessPage: React.FC = () => {
   const location = useLocation();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [isDownloadingBundle, setIsDownloadingBundle] = useState(false);
   const [bundleDownloadError, setBundleDownloadError] = useState('');
+  const [paymentStatus, setPaymentStatus] = useState<'loading' | 'pending' | 'failed' | 'review' | 'error'>('loading');
+  const [statusMessage, setStatusMessage] = useState('');
   const state = location.state as { registration?: Registration; ticket?: Ticket; tickets?: Ticket[] } | undefined;
   const registration = state?.registration;
   const ticket = state?.ticket;
   const tickets = state?.tickets ?? (ticket ? [ticket] : []);
+  const txnid = searchParams.get('txnid') || '';
+
+  useEffect(() => {
+    if (!txnid || registration) return;
+    let active = true;
+    let refreshing = false;
+    let terminal = false;
+    const refresh = async () => {
+      if (refreshing || terminal) return;
+      refreshing = true;
+      try {
+        const idempotencyKey = sessionStorage.getItem(
+          `ticketing.payment-idempotency.${txnid}`,
+        );
+        if (!idempotencyKey) {
+          terminal = true;
+          setPaymentStatus('error');
+          setStatusMessage('This browser session cannot access the payment confirmation. Return using the same browser session or contact the event team.');
+          return;
+        }
+        const payment = await paymentsApi.status(txnid, idempotencyKey);
+        if (!active) return;
+        if (payment.payment_verified && payment.registration && payment.tickets) {
+          const storageKey = sessionStorage.getItem(
+            `ticketing.payment-idempotency-storage.${txnid}`,
+          );
+          if (storageKey) sessionStorage.removeItem(storageKey);
+          sessionStorage.removeItem(`ticketing.payment-idempotency.${txnid}`);
+          sessionStorage.removeItem(`ticketing.payment-idempotency-storage.${txnid}`);
+          const confirmedTickets = payment.tickets.map(mapTicket);
+          navigate('/registration/success', {
+            replace: true,
+            state: {
+              registration: mapRegistration(payment.registration),
+              ticket: confirmedTickets[0],
+              tickets: confirmedTickets,
+            },
+          });
+          return;
+        }
+        if (payment.payment_status === 'FAILED') {
+          terminal = true;
+          sessionStorage.removeItem(`ticketing.payment-idempotency.${txnid}`);
+          sessionStorage.removeItem(`ticketing.payment-idempotency-storage.${txnid}`);
+          setPaymentStatus('failed');
+          setStatusMessage('PayU reported that this payment failed or was cancelled. No tickets have been issued.');
+        } else if (payment.ticket_issuance_status === 'ADMIN_REVIEW_REQUIRED') {
+          terminal = true;
+          setPaymentStatus('review');
+          setStatusMessage(payment.verification_message || 'Payment requires administrator review. Do not pay again; contact event support with your transaction reference.');
+        } else {
+          setPaymentStatus('pending');
+          setStatusMessage('Payment is still being confirmed by PayU. This page will check again shortly; do not retry payment while it is processing.');
+        }
+      } catch (error) {
+        if (!active) return;
+        if (error instanceof ApiError && error.code === 'PAYMENT_REVIEW_REQUIRED') {
+          terminal = true;
+          setPaymentStatus('review');
+          setStatusMessage(error.message);
+          return;
+        }
+        setPaymentStatus('error');
+        setStatusMessage(error instanceof Error ? error.message : 'Payment status could not be checked.');
+      } finally {
+        refreshing = false;
+      }
+    };
+    void refresh();
+    const interval = window.setInterval(() => void refresh(), 5000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, [txnid, registration, navigate]);
 
   const downloadAllTickets = async () => {
     setIsDownloadingBundle(true);
@@ -28,7 +109,7 @@ export const RegistrationSuccessPage: React.FC = () => {
       const url = URL.createObjectURL(pdf);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `tickets-${registration.id}.pdf`;
+      link.download = `tickets-${registration.registrationCode || registration.id}.pdf`;
       link.click();
       window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (error) {
@@ -67,7 +148,9 @@ export const RegistrationSuccessPage: React.FC = () => {
               </div>
               <div className="inline-flex max-w-full flex-wrap items-center justify-center gap-x-3 gap-y-1 rounded-xl border border-slate-800 bg-slate-900 px-4 py-2 font-mono text-xs text-slate-300">
                 <span className="text-slate-500">REGISTRATION ID:</span>
-                <span className="break-all font-bold text-indigo-400">{registration.id}</span>
+                <span className="break-all font-bold text-indigo-400">
+                  {registration.registrationCode || registration.id}
+                </span>
               </div>
             </div>
 
@@ -124,6 +207,41 @@ export const RegistrationSuccessPage: React.FC = () => {
               </Link>
             </div>
           </>
+        ) : txnid ? (
+          <div className="mx-auto max-w-lg rounded-2xl border border-slate-800 bg-slate-900 p-8 text-center">
+            {paymentStatus === 'failed' ? (
+              <TicketIcon className="mx-auto mb-4 h-10 w-10 text-rose-300" />
+            ) : paymentStatus === 'pending' || paymentStatus === 'review' ? (
+              <Clock3 className="mx-auto mb-4 h-10 w-10 text-amber-300" />
+            ) : (
+              <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-indigo-400 border-t-transparent" role="status" aria-label="Checking payment" />
+            )}
+            <h1 className="font-display text-2xl font-bold text-white">
+              {paymentStatus === 'failed'
+                ? 'Payment not completed'
+                : paymentStatus === 'review'
+                  ? 'Payment needs review'
+                  : 'Confirming your payment'}
+            </h1>
+            <p role="status" className="mt-2 text-sm leading-relaxed text-slate-400">
+              {statusMessage || 'Checking the payment status securely with PayU…'}
+            </p>
+            <p className="mt-4 break-all font-mono text-xs text-slate-500">Transaction: {txnid}</p>
+            {paymentStatus === 'failed' && (
+              <Link
+                to="/register"
+                className="mt-6 inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-indigo-500"
+              >
+                Try again <ArrowRight className="h-4 w-4" />
+              </Link>
+            )}
+            <Link
+              to="/events"
+              className="mt-6 ml-3 inline-flex items-center justify-center gap-2 rounded-xl border border-slate-700 px-5 py-3 text-sm font-semibold text-slate-300 transition-colors hover:bg-slate-800"
+            >
+              Back to Dhandiya Night
+            </Link>
+          </div>
         ) : (
           <div className="mx-auto max-w-lg rounded-2xl border border-slate-800 bg-slate-900 p-8 text-center">
             <TicketIcon className="mx-auto mb-4 h-10 w-10 text-indigo-300" />

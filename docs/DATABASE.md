@@ -150,7 +150,7 @@ admission_count
 availability
 ```
 
-For Dhandiya Night, the registration page shows INR 149 for one admission and INR 745 for a six-admission combo. Razorpay orders add a fixed ₹4 per admission (₹153 and ₹769 total, respectively); this charge is included in the persisted payment amount in minor currency units and is not shown on the registration page. `admission_count` describes the admissions issued for one selected offer; capacity is reserved while a payment order is pending and consumed for each resulting ticket.
+For Dhandiya Night, the registration page shows INR 149 for one admission and INR 745 for a six-admission combo. PayU requests add a fixed ₹4 per admission (₹153 and ₹769 total, respectively); this charge is included in the persisted payment amount in minor currency units and is not shown on the registration page. `admission_count` describes the admissions issued for one selected offer; capacity is reserved while a payment transaction is pending and consumed for each resulting ticket.
 
 ---
 
@@ -161,6 +161,7 @@ Typical information:
 
 ```text
 id
+registration_code
 event
 buyer_name
 buyer_email
@@ -172,6 +173,10 @@ updated_at
 ```
 
 Buyer/contact information belongs to the registration and must not be redundantly copied onto every ticket. Each ticket stores its own required attendee name; for a combo, four attendee names are required, with the first name also serving as the buyer name. Buyer email and phone remain stored once on the registration.
+Each ticket has a unique human-facing `ticket_code`, composed of its
+registration code plus an admission suffix (for example,
+`SIMS-DN-2026-00008-T01`). Tickets in the same booking share the registration
+code but each have their own ticket code and QR token.
 
 Registration source must distinguish:
 
@@ -181,6 +186,11 @@ ON_SPOT
 ```
 
 Both registration types must use the same registration/ticket architecture.
+`id` remains the internal UUID used by foreign keys and API routes.
+`registration_code` is the human-facing, unique sequential reference formatted
+as `SIMS-DN-YYYY-NNNNN`. The year comes from the event start date and the
+sequence is shared by registrations created in that year. `RegistrationSequence`
+stores the next number and is incremented atomically with registration creation.
 
 ## RegistrationIdempotency
 Stores one idempotency key and normalized request fingerprint for a registration operation, with a one-to-one link to the resulting registration. The UUID key is the primary key, so the database arbitrates concurrent duplicate submissions. The key record, registration, tickets, and registration audit record are committed atomically; a failed transaction leaves no incomplete key record or partial ticket set.
@@ -193,7 +203,7 @@ The registration model does not impose uniqueness on buyer email or phone. A dif
 Stores an idempotent online registration/payment attempt, normalized request fingerprint, buyer and attendee details, pending capacity reservation, and an optional link to the verified registration. The UUID idempotency key is the primary key. A captured payment whose ticket issuance needs investigation moves the intent to `REVIEW_REQUIRED`.
 
 ## Payment
-Stores each Razorpay order/payment attempt, amount, currency, lifecycle status, verification status, capture time, ticket-issuance status, expiry, and failure/verification metadata. Razorpay order and payment IDs are unique. A conditional database uniqueness constraint permits at most one verified captured payment per payment intent. Client-reported failure metadata is informational and cannot mark an order failed or associate an unverified payment ID. Captured payments whose tickets were not issued or whose registration is incomplete are retained and reported for administrator review; the application has no refund or settlement-reversal operation.
+Stores each payment-provider transaction, amount, currency, lifecycle status, verification status, capture time, ticket-issuance status, expiry, and failure/verification metadata. Provider transaction and payment IDs are unique. The provider field distinguishes PayU payments from retained historical Razorpay records; the migration renames provider ID columns in place without dropping existing values. A conditional database uniqueness constraint permits at most one verified captured payment per payment intent. Captured payments whose tickets were not issued or whose registration is incomplete are retained and reported for administrator review; the application has no refund or settlement-reversal operation.
 
 ## TicketDelivery
 Stores retryable email/PDF delivery state for a registration, including recipient, attempt count, last error, and sent time. It is one-to-one with the registration and does not control ticket validity.

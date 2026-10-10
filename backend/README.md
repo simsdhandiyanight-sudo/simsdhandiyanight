@@ -74,8 +74,8 @@ not run the email command as a Vercel Cron job.
 Create a Neon PostgreSQL database and set `DATABASE_URL` on the Render web
 service to its TLS-enabled direct connection string. Keep the connection
 string in Render's environment, not in source control. Render's worker reuses
-that setting from the web service. Use separate Neon databases/branches,
-Razorpay test credentials, and Brevo settings for staging and production.
+that setting from the web service. Use separate Neon databases/branches, PayU test credentials, and Brevo
+settings for staging and production.
 
 Deploy `client/` as the Vercel project root. Set the build-time
 `VITE_API_BASE_URL` to `https://<render-service-host>/api/v1`; it is a public
@@ -89,11 +89,24 @@ Render sites; verify sign-in in the browsers used by event staff.
 
 Set `BREVO_API_KEY` only in Render's environment, and rotate any key that was
 previously exposed. Configure `BREVO_SENDER_EMAIL` as
-`sims.dhandiyanight@gmail.com`, plus `BREVO_SENDER_NAME`. Configure Razorpay
-with test keys for staging. The worker sends one email per ticket, reuses the
+`sims.dhandiyanight@gmail.com`, plus `BREVO_SENDER_NAME`. Configure the PayU
+merchant key and salt as backend-only secrets; use `PAYU_ENVIRONMENT=test` for
+staging and register the callback/webhook URLs with PayU. Production mode must
+use separate production credentials after merchant activation and sandbox
+validation. `PAYU_FRONTEND_URL` is the browser return origin. The worker sends
+one email per ticket, reuses the
 stored PDF on retries, reserves 295 regular and 5 staff/complimentary sends per
 local calendar day, and retains ambiguous outcomes for manual reconciliation.
 No live Brevo send has been validated by the test suite.
+
+Schedule `python manage.py reconcile_payu_payments` on the backend every
+minute or every few minutes to retry due PayU verifications. Each run is a
+bounded pass; automatic verification uses at most five attempts per payment
+with exponential backoff and honors a PayU `Retry-After` header. Captured
+payments needing review are not automatically ticketed. An administrator can
+retry verification or resume verified ticket issuance from the Payment Review
+page. Do not rerun a checkout or charge the customer again to reconcile a
+pending transaction.
 
 Never commit `.env` files. The root `.env.example` contains names and
 non-secret development defaults only.

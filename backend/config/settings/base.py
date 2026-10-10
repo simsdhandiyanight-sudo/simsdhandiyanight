@@ -184,8 +184,13 @@ if DEBUG:
 CORS_ALLOW_HEADERS = (*default_headers, "idempotency-key")
 CORS_ALLOW_CREDENTIALS = True
 
-RAZORPAY_KEY_ID = os.environ.get("RAZORPAY_KEY_ID", "")
-RAZORPAY_KEY_SECRET = os.environ.get("RAZORPAY_KEY_SECRET", "")
+PAYU_MERCHANT_KEY = os.environ.get("PAYU_MERCHANT_KEY", "")
+PAYU_MERCHANT_SALT = os.environ.get("PAYU_MERCHANT_SALT", "")
+PAYU_ENVIRONMENT = os.environ.get("PAYU_ENVIRONMENT", "test").lower()
+PAYU_SUCCESS_URL = os.environ.get("PAYU_SUCCESS_URL", "")
+PAYU_FAILURE_URL = os.environ.get("PAYU_FAILURE_URL", "")
+PAYU_WEBHOOK_URL = os.environ.get("PAYU_WEBHOOK_URL", "")
+PAYU_FRONTEND_URL = os.environ.get("PAYU_FRONTEND_URL", "")
 EMAIL_BACKEND = os.environ.get(
     "EMAIL_BACKEND",
     "django.core.mail.backends.smtp.EmailBackend",

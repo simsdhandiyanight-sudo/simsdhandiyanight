@@ -45,25 +45,24 @@ export const registrationRequest = (params: RegistrationCreateParams) => {
   };
 };
 
-export const registrationIdempotencyKey = async (params: RegistrationCreateParams): Promise<string> => {
+export const registrationIdempotencyStorageKey = async (params: RegistrationCreateParams): Promise<string> => {
   const request = registrationRequest(params);
   const fingerprint = await requestFingerprint({
     ...request,
     source: params.source,
   });
-  const storageKey = `ticketing.registration-idempotency.${fingerprint}`;
+  return `ticketing.registration-idempotency.${fingerprint}`;
+};
+
+export const registrationIdempotencyKey = async (params: RegistrationCreateParams): Promise<string> => {
+  const storageKey = await registrationIdempotencyStorageKey(params);
   const idempotencyKey = sessionStorage.getItem(storageKey) || crypto.randomUUID();
   sessionStorage.setItem(storageKey, idempotencyKey);
   return idempotencyKey;
 };
 
 export const clearRegistrationIdempotencyKey = async (params: RegistrationCreateParams): Promise<void> => {
-  const request = registrationRequest(params);
-  const fingerprint = await requestFingerprint({
-    ...request,
-    source: params.source,
-  });
-  sessionStorage.removeItem(`ticketing.registration-idempotency.${fingerprint}`);
+  sessionStorage.removeItem(await registrationIdempotencyStorageKey(params));
 };
 
 const requestFingerprint = async (value: unknown): Promise<string> => {

@@ -46,7 +46,9 @@ class CreateRegistrationSerializer(serializers.Serializer):
 
 class RegistrationTicketSerializer(serializers.Serializer):
     id = serializers.UUIDField()
+    ticket_code = serializers.CharField()
     registration_id = serializers.UUIDField()
+    registration_code = serializers.CharField(source="registration.registration_code")
     event_id = serializers.UUIDField(source="registration.event_id")
     event_name = serializers.CharField(source="registration.event.name")
     buyer_name = serializers.CharField(source="registration.buyer_name")
@@ -79,6 +81,7 @@ class RegistrationTicketSerializer(serializers.Serializer):
 
 class RegistrationSerializer(serializers.Serializer):
     id = serializers.UUIDField()
+    registration_code = serializers.CharField()
     event_id = serializers.UUIDField()
     event_name = serializers.CharField(source="event.name")
     buyer = serializers.SerializerMethodField()
@@ -100,6 +103,7 @@ class RegistrationSerializer(serializers.Serializer):
 
 class RegistrationListSerializer(serializers.Serializer):
     id = serializers.UUIDField()
+    registration_code = serializers.CharField()
     event_id = serializers.UUIDField()
     event_name = serializers.CharField(source="event.name")
     buyer = serializers.SerializerMethodField()

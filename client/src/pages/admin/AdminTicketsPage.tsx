@@ -175,7 +175,7 @@ export const AdminTicketsPage: React.FC = () => {
                     return (
                       <tr key={tkt.id} className="hover:bg-slate-800/40 transition-colors">
                         <td className="py-3.5 px-4 font-mono font-bold text-indigo-400">
-                          {tkt.id}
+                          {tkt.ticketCode || tkt.id}
                         </td>
 
                         <td className="py-3.5 px-4">

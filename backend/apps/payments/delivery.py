@@ -187,7 +187,7 @@ def _ticket_email_content(ticket):
         ("Venue", event.venue),
         ("Location", event.address),
         ("Attendee", attendee),
-        ("Ticket ID", str(ticket.id)),
+        ("Ticket ID", ticket.ticket_code),
         ("Ticket type", registration.ticket_tier.name),
     ]
     plain = [

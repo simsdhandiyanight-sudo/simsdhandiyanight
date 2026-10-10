@@ -361,11 +361,19 @@ POST /api/v1/registrations/on-spot/
 
 Public online creation uses the payment-order and verification flow in section 14; direct public `POST /api/v1/registrations/` is blocked with `402 PAYMENT_REQUIRED`. One completed registration represents one buyer/order and may return one or more tickets. Each returned ticket has its own ID, attendee name, and opaque QR token; the current combo returns six tickets. Include exactly one valid `attendee_names` entry per admission in the selected offer. The buyer name is the first attendee name, and the buyer email and phone are shared once on the registration.
 
+Registration and ticket responses include a human-facing `registration_code`
+such as `SIMS-DN-2026-00001`. Codes increment continuously per event year and
+appear on tickets and registration records. The existing `id` and
+`registration_id` UUID fields remain unchanged for API lookups and relationships.
+Each ticket response also includes its own unique `ticket_code`, such as
+`SIMS-DN-2026-00001-T01`; tickets in one registration use incrementing
+admission suffixes and retain separate QR tokens.
+
 ---
 
 # 14. Online Payment and Registration
 
-Public online tickets can be issued only after the backend verifies a captured Razorpay payment. The supported integration is currently Razorpay TEST/SANDBOX mode; live-mode verification and settlement are deferred until organization merchant credentials are available.
+Public online tickets are issued only after the backend validates PayU's reverse response hash and confirms the captured transaction with PayU's Verify Payment API.
 
 Create or replay an order with a UUID idempotency key:
 
@@ -392,36 +400,34 @@ Example:
 
 For the six-admission combo, `attendee_names` must contain six valid names. The backend derives price, currency, event, and admission count from the selected ticket offer; a client cannot supply payment success or ticket status.
 
-The first order response is `201 Created`; a retry with the same key and normalized request reuses the existing payment intent/order and returns `200 OK`. Reusing the key with a different request returns `409 Conflict`.
+The first response is `201 Created`; a retry with the same key and normalized request reuses the existing payment intent/transaction and returns `200 OK`. Reusing the key with a different request returns `409 Conflict`. The backend response contains `checkout_url` and the signed `payment_params` for the frontend to submit as an `application/x-www-form-urlencoded` POST to PayU. The merchant salt is never returned.
 
-After Razorpay Checkout returns its order, payment, and signature values, verify them server-side:
+PayU posts its signed success and failure responses to the configured callback URLs. Those callbacks and the configured PayU webhook share server-side processing. The callback hash is checked, then the backend calls PayU's Verify Payment API using its server-side credential:
 
 ```http
-POST /api/v1/payments/verify/
-Content-Type: application/json
+POST /api/v1/payments/payu/success/
+Content-Type: application/x-www-form-urlencoded
 ```
 
-```json
-{
-  "razorpay_order_id": "order_from_checkout",
-  "razorpay_payment_id": "payment_from_checkout",
-  "razorpay_signature": "signature_from_checkout"
-}
+The failure callback is `POST /api/v1/payments/payu/failure/`; PayU webhook notifications are accepted at `POST /api/v1/payments/payu/webhook/`. Configure the exact webhook URL in the PayU merchant dashboard. The frontend return page is set using `PAYU_FRONTEND_URL`.
+
+The browser return page can check transaction status with:
+
+```http
+GET /api/v1/payments/status/?txnid=<merchant_transaction_id>&idempotency_key=<booking_uuid>
 ```
 
-The backend validates the checkout signature and retrieves the order and payment from Razorpay. It issues the registration, tickets, unique QR tokens, and delivery record only after the provider confirms matching order, amount, currency, and `captured` status. A repeated verification returns the existing registration and ticket set. PDF generation and email delivery are handled by the backend; delivery failures remain retryable by an administrator without reversing a verified payment or duplicating tickets.
+The idempotency key must be the UUID originally sent in `Idempotency-Key`; it prevents an exposed transaction reference alone from granting access to tickets. The status endpoint also reconciles directly with PayU and never trusts browser-supplied payment status. It returns tickets only after the merchant transaction ID, amount, booking details, PayU response hash, and PayU's captured transaction status are verified. Duplicate callbacks are idempotent. If PayU confirms capture but ticket issuance fails, the payment remains recorded and the case requires administrator review; tickets are not issued a second time. Administrators can inspect cases through `GET /api/v1/payments/review/dashboard/`.
 
-If Razorpay confirms capture but registration/ticket issuance fails, the payment remains recorded as captured, the issuance failure and audit details are retained, and verification returns `409 PAYMENT_REVIEW_REQUIRED`. The associated payment intent and payment are marked for administrator review. A retry does not automatically retry ticket issuance after this state is recorded. Administrators can inspect inconsistencies in the Payment Review page or through `GET /api/v1/payments/review/dashboard/`; the endpoint is restricted to administrators and reports captured payments without complete tickets, duplicate captures, and online tickets without a valid verified payment.
+This implementation follows PayU's [Hosted Checkout](https://docs.payu.in/docs/cb-integration-non-seamless) request/reverse-hash format and the documented Verify Payment API (`verify_payment` command at `https://test.payu.in/merchant/postservice.php?form=2` in test mode and `https://info.payu.in/merchant/postservice.php?form=2` in production).
 
-Payment verification is the only financial action supported by this application. No refund API, refund queue, refund state, or Razorpay refund call is supported. Captured-payment cases requiring attention are for manual handling outside this application; the application does not initiate refunds or settlement reversals.
+Set backend-only `PAYU_MERCHANT_KEY` and `PAYU_MERCHANT_SALT`, plus `PAYU_ENVIRONMENT=test` during sandbox integration. Production uses `PAYU_ENVIRONMENT=production`; test and production merchant credentials must remain separate. `PAYU_SUCCESS_URL` and `PAYU_FAILURE_URL` should point to the backend callback URLs. `PAYU_WEBHOOK_URL` is the corresponding public webhook endpoint for dashboard configuration.
 
-`POST /api/v1/payments/failure/` is an informational browser callback only. Its report is not trusted as proof that Razorpay failed a payment and does not mark an order failed or associate an unverified payment ID. An unexpired order remains reusable.
-
-Direct public `POST /api/v1/registrations/` returns `402 PAYMENT_REQUIRED`; it cannot issue online tickets. Authorized on-spot registration continues through its protected endpoint and does not use Razorpay.
+Direct public `POST /api/v1/registrations/` returns `402 PAYMENT_REQUIRED`; it cannot issue online tickets. Authorized on-spot registration continues through its protected endpoint and does not use the payment gateway.
 
 The Dhandiya Night canonical event UUID is `8b3f7a20-6e8d-4b91-a462-9c5d2f1e7043`, with slug `dhandiya-night-2026`. The public landing page uses hardcoded descriptive content; event detail and ticket availability are loaded from the backend API. Render seeds the canonical event and ticket tiers at startup. Do not use the frontend demo ID `evt-technova-2026` as the production event primary key.
 
-Configured offer prices are ₹149 for one admission and ₹745 for six combo admissions. Razorpay orders include an additional fixed ₹4 per admission (₹153 single; ₹769 combo); this charge is not shown on the registration page and is not a percentage-based tax calculation. Live Razorpay verification and settlement handling remain deferred; refunds are unsupported. Do not treat this TEST/SANDBOX integration as production readiness.
+Configured offer prices are ₹149 for one admission and ₹745 for six combo admissions. PayU payment requests include the existing fixed ₹4 per-admission charge (₹153 single; ₹769 combo); this charge is not shown on the registration page and is not a percentage-based tax calculation. Refunds and settlement reversals are not supported in this application. Sandbox integration must be validated with the merchant account before enabling production mode.
 
 ---
 

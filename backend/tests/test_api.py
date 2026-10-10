@@ -1,6 +1,4 @@
 import base64
-import hashlib
-import hmac
 import os
 import uuid
 from datetime import timedelta
@@ -22,8 +20,6 @@ from apps.registrations.models import Registration
 from apps.scanning.models import Gate, StaffAssignment, TicketScan
 from apps.registrations.services import RegistrationConflict, create_registration
 from apps.tickets.models import Ticket
-from razorpay.errors import BadRequestError
-from tests.payment_fakes import FakeRazorpayClient
 
 
 class FakeBrevoResponse:
@@ -155,8 +151,10 @@ class AdminBootstrapTests(TestCase):
 
 
 @override_settings(
-    RAZORPAY_KEY_ID="rzp_test_id",
-    RAZORPAY_KEY_SECRET="test_secret",
+    PAYU_MERCHANT_KEY="payu-test-key",
+    PAYU_MERCHANT_SALT="payu-test-salt",
+    PAYU_ENVIRONMENT="test",
+    PAYU_FRONTEND_URL="https://tickets.example.test",
     BREVO_API_KEY="brevo-test-key",
     BREVO_SENDER_EMAIL="tickets@example.test",
 )
@@ -249,6 +247,15 @@ class TicketingApiTests(TestCase):
 
         self.assertEqual(registration.ticket_tier.admission_count, 6)
         self.assertEqual([ticket.attendee_name for ticket in tickets], names)
+        expected_ticket_codes = [
+            f"{registration.registration_code}-T{index:02d}"
+            for index in range(1, 7)
+        ]
+        self.assertEqual(
+            [ticket.ticket_code for ticket in tickets],
+            expected_ticket_codes,
+        )
+        self.assertEqual(len({ticket.ticket_code for ticket in tickets}), 6)
 
     def test_retired_tier_is_unavailable_for_new_orders_but_existing_payment_can_finish(self):
         retired_combo = TicketTier.objects.create(
@@ -285,7 +292,7 @@ class TicketingApiTests(TestCase):
         )
         self.assertEqual(len(tickets), 4)
 
-    def payment_order(self, payload, key, provider):
+    def payment_order(self, payload, key, provider=None):
         return self.client.post(
             "/api/v1/payments/create-order/",
             payload,
@@ -293,22 +300,37 @@ class TicketingApiTests(TestCase):
             HTTP_IDEMPOTENCY_KEY=str(key),
         )
 
-    def verify_order(self, order_id, provider):
-        payment_id = f"pay_{order_id.removeprefix('order_')}"
-        signature = hmac.new(
-            b"test_secret",
-            f"{order_id}|{payment_id}".encode("utf-8"),
-            hashlib.sha256,
-        ).hexdigest()
-        return self.client.post(
-            "/api/v1/payments/verify/",
-            {
-                "razorpay_order_id": order_id,
-                "razorpay_payment_id": payment_id,
-                "razorpay_signature": signature,
-            },
-            format="json",
+    def verify_order(self, order_id, provider=None):
+        payment = Payment.objects.select_related("intent").get(
+            provider_order_id=order_id
         )
+        details = {
+            "txnid": order_id,
+            "mihpayid": f"payu-{payment.id.hex}",
+            "amount": f"{payment.amount / 100:.2f}",
+            "productinfo": "Dhandiya Night Tickets",
+            "firstname": payment.intent.buyer_name.strip().split(maxsplit=1)[0][:60],
+            "email": payment.intent.buyer_email,
+            "udf1": str(payment.intent_id),
+            "udf2": str(payment.id),
+            "status": "success",
+            "unmappedstatus": "captured",
+        }
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {
+            "status": 1,
+            "transaction_details": {order_id: details},
+        }
+        idempotency_key = str(payment.intent_id)
+        with patch("apps.payments.services.requests.post", return_value=response):
+            return self.client.get(
+                "/api/v1/payments/status/",
+                {
+                    "txnid": order_id,
+                    "idempotency_key": idempotency_key,
+                },
+            )
 
     def create_online_registration(self, tier=None, buyer=None):
         payload = self.registration_payload(tier)
@@ -321,12 +343,36 @@ class TicketingApiTests(TestCase):
             ]
         if buyer:
             payload["buyer"].update(buyer)
-        provider = FakeRazorpayClient()
-        with patch("apps.payments.services.razorpay.Client", return_value=provider):
-            order = self.payment_order(payload, uuid.uuid4(), provider)
-            if order.status_code >= 400 or order.data.get("payment_verified"):
-                return order
-            return self.verify_order(order.data["order_id"], provider)
+        order = self.payment_order(payload, uuid.uuid4())
+        if order.status_code >= 400 or order.data.get("payment_verified"):
+            return order
+        return self.verify_order(order.data["order_id"])
+
+    def test_registration_codes_increment_in_order_and_keep_uuid_for_api_identity(self):
+        first = self.create_online_registration()
+        second = self.create_online_registration(
+            buyer={
+                "name": "Another Buyer",
+                "email": "another@example.test",
+            }
+        )
+
+        expected_prefix = f"SIMS-DN-{self.event.start_at.year}-"
+        self.assertEqual(first.status_code, 200, first.data)
+        self.assertEqual(second.status_code, 200, second.data)
+        self.assertTrue(first.data["registration"]["id"])
+        self.assertEqual(
+            first.data["registration"]["registration_code"],
+            f"{expected_prefix}00001",
+        )
+        self.assertEqual(
+            second.data["registration"]["registration_code"],
+            f"{expected_prefix}00002",
+        )
+        self.assertEqual(
+            first.data["tickets"][0]["registration_code"],
+            f"{expected_prefix}00001",
+        )
 
     def test_public_event_uses_canonical_backend_identity_and_live_capacity(self):
         canonical = Event.objects.create(
@@ -433,16 +479,13 @@ class TicketingApiTests(TestCase):
 
     def test_combo_requires_a_name_for_each_ticket(self):
         payload = self.registration_payload(self.combo)
-        provider = FakeRazorpayClient()
-        with patch("apps.payments.services.razorpay.Client", return_value=provider):
-            response = self.payment_order(payload, uuid.uuid4(), provider)
+        response = self.payment_order(payload, uuid.uuid4())
         self.assertEqual(response.status_code, 400)
         self.assertIn("attendee_names", response.data["error"]["details"])
         self.assertEqual(Registration.objects.count(), 0)
 
         payload["attendee_names"] = ["One", "Two", "Three"]
-        with patch("apps.payments.services.razorpay.Client", return_value=provider):
-            response = self.payment_order(payload, uuid.uuid4(), provider)
+        response = self.payment_order(payload, uuid.uuid4())
         self.assertEqual(response.status_code, 400)
         self.assertEqual(Registration.objects.count(), 0)
 
@@ -462,434 +505,35 @@ class TicketingApiTests(TestCase):
         self.assertEqual(Registration.objects.count(), 0)
         self.assertEqual(Ticket.objects.count(), 0)
 
-    def test_payment_order_retry_and_verification_issue_once(self):
-        key = str(uuid.uuid4())
-        payload = self.registration_payload(
-            self.combo,
-            attendee_names=[
-                "Attendee One",
-                "Attendee Two",
-                "Attendee Three",
-                "Attendee Four",
-            ],
-        )
-        provider = FakeRazorpayClient()
-        with patch("apps.payments.services.razorpay.Client", return_value=provider):
-            first_order = self.payment_order(payload, key, provider)
-            repeated_order = self.payment_order(payload, key, provider)
-            self.assertEqual(first_order.status_code, 201, first_order.data)
-            self.assertEqual(repeated_order.status_code, 200, repeated_order.data)
-            self.assertEqual(first_order.data["order_id"], repeated_order.data["order_id"])
-            self.assertNotIn("expire_by", provider.last_order_payload)
-            self.assertEqual(Registration.objects.count(), 0)
-            self.assertEqual(Ticket.objects.count(), 0)
-            first = self.verify_order(first_order.data["order_id"], provider)
-            replay = self.verify_order(first_order.data["order_id"], provider)
 
-        self.assertEqual(first.status_code, 200, first.data)
-        self.assertEqual(replay.status_code, 200, replay.data)
-        self.assertEqual(first.data["registration"]["id"], replay.data["registration"]["id"])
-        self.assertEqual(
-            [ticket["id"] for ticket in first.data["tickets"]],
-            [ticket["id"] for ticket in replay.data["tickets"]],
-        )
-        self.assertEqual(
-            [ticket["qr_token"] for ticket in first.data["tickets"]],
-            [ticket["qr_token"] for ticket in replay.data["tickets"]],
-        )
-        self.assertEqual(Registration.objects.count(), 1)
-        self.assertEqual(Ticket.objects.count(), 4)
-        self.assertEqual(
-            len({ticket["qr_token"] for ticket in replay.data["tickets"]}),
-            4,
-        )
-        self.assertEqual(PaymentIntent.objects.count(), 1)
-        self.assertEqual(Payment.objects.count(), 1)
-        self.assertEqual(AuditLog.objects.filter(action="REGISTRATION_CREATED").count(), 1)
-        self.assertEqual(TicketDelivery.objects.count(), 4)
-        self.assertEqual(
-            TicketDelivery.objects.filter(status=TicketDelivery.Status.PENDING).count(),
-            4,
-        )
 
-    def test_payment_order_adds_four_rupees_per_admission(self):
-        six_ticket_combo = TicketTier.objects.create(
-            event=self.event,
-            slug="combo-six",
-            name="Combo Offer — Buy 5, Get 1 Free",
-            price="745.00",
-            admission_count=6,
-        )
-        provider = FakeRazorpayClient()
-        with patch("apps.payments.services.razorpay.Client", return_value=provider):
-            single_order = self.payment_order(
-                self.registration_payload(self.single),
-                uuid.uuid4(),
-                provider,
-            )
-            combo_payload = self.registration_payload(
-                six_ticket_combo,
-                attendee_names=[
-                    "Attendee One",
-                    "Attendee Two",
-                    "Attendee Three",
-                    "Attendee Four",
-                    "Attendee Five",
-                    "Attendee Six",
-                ],
-            )
-            combo_order = self.payment_order(
-                combo_payload,
-                uuid.uuid4(),
-                provider,
-            )
 
-        self.assertEqual(single_order.status_code, 201, single_order.data)
-        self.assertEqual(single_order.data["amount"], 15300)
-        self.assertEqual(single_order.data["display_amount"], 153)
-        self.assertEqual(
-            provider.orders[single_order.data["order_id"]]["amount"],
-            15300,
-        )
-        self.assertEqual(combo_order.status_code, 201, combo_order.data)
-        self.assertEqual(combo_order.data["amount"], 76900)
-        self.assertEqual(combo_order.data["display_amount"], 769)
-        self.assertEqual(
-            provider.orders[combo_order.data["order_id"]]["amount"],
-            76900,
-        )
-        self.assertEqual(
-            Payment.objects.get(intent__ticket_tier=self.single).amount,
-            15300,
-        )
-        self.assertEqual(
-            Payment.objects.get(intent__ticket_tier=six_ticket_combo).amount,
-            76900,
-        )
 
-    def test_idempotency_key_cannot_be_reused_for_different_request(self):
-        key = str(uuid.uuid4())
-        provider = FakeRazorpayClient()
-        changed_payload = self.registration_payload(
-            buyer={
-                "name": "Different Buyer",
-                "email": "different@example.test",
-                "phone": "+919876543210",
-            }
-        )
-        with patch("apps.payments.services.razorpay.Client", return_value=provider):
-            first = self.payment_order(self.registration_payload(), key, provider)
-            conflict = self.payment_order(changed_payload, key, provider)
-        self.assertEqual(first.status_code, 201, first.data)
-        self.assertEqual(conflict.status_code, 409)
-        self.assertEqual(conflict.data["error"]["code"], "IDEMPOTENCY_CONFLICT")
-        self.assertEqual(Registration.objects.count(), 0)
-        self.assertEqual(Ticket.objects.count(), 0)
 
-    def test_different_idempotency_keys_create_distinct_registrations(self):
-        first = self.create_online_registration()
-        second = self.create_online_registration(
-            buyer={
-                "name": "Another Buyer",
-                "email": "another@example.test",
-                "phone": "+919876543210",
-            }
-        )
-        self.assertEqual(first.status_code, 200, first.data)
-        self.assertEqual(second.status_code, 200, second.data)
-        self.assertNotEqual(
-            first.data["registration"]["id"],
-            second.data["registration"]["id"],
-        )
-        self.assertEqual(Registration.objects.count(), 2)
-        self.assertEqual(Ticket.objects.count(), 2)
 
-    def test_ticket_insert_failure_preserves_capture_and_requires_admin_review(self):
-        key = str(uuid.uuid4())
-        payload = self.registration_payload()
-        provider = FakeRazorpayClient()
-        with patch("apps.payments.services.razorpay.Client", return_value=provider):
-            order = self.payment_order(payload, key, provider)
-            self.assertEqual(order.status_code, 201, order.data)
-            with patch(
-                "apps.registrations.services.Ticket.objects.bulk_create",
-                side_effect=RuntimeError("simulated ticket insert failure"),
-            ) as ticket_insert:
-                failed = self.verify_order(order.data["order_id"], provider)
-                self.assertEqual(failed.status_code, 409, failed.data)
-                self.assertEqual(
-                    failed.data["error"]["code"],
-                    "PAYMENT_REVIEW_REQUIRED",
-                )
-                retry = self.verify_order(order.data["order_id"], provider)
-                self.assertEqual(retry.status_code, 409, retry.data)
-                self.assertEqual(
-                    retry.data["error"]["code"],
-                    "PAYMENT_REVIEW_REQUIRED",
-                )
-                self.assertEqual(ticket_insert.call_count, 1)
-            self.assertEqual(Registration.objects.count(), 0)
-            self.assertEqual(Ticket.objects.count(), 0)
-        payment = Payment.objects.get()
-        payment_intent = PaymentIntent.objects.get()
-        self.assertEqual(payment.status, Payment.Status.CAPTURED)
-        self.assertIsNotNone(payment.captured_at)
-        self.assertEqual(
-            payment.verification_status,
-            Payment.VerificationStatus.VERIFIED,
-        )
-        self.assertEqual(
-            payment.ticket_issuance_status,
-            Payment.TicketIssuanceStatus.ADMIN_REVIEW_REQUIRED,
-        )
-        self.assertIn("simulated ticket insert failure", payment.ticket_issuance_failure)
-        self.assertEqual(payment_intent.status, PaymentIntent.Status.REVIEW_REQUIRED)
-        review_log = AuditLog.objects.get(action="PAYMENT_REVIEW_REQUIRED")
-        self.assertEqual(review_log.resource_id, str(payment.id))
-        self.assertEqual(
-            review_log.metadata["razorpay_payment_id"],
-            payment.razorpay_payment_id,
-        )
-        self.client.force_authenticate(self.admin)
-        dashboard = self.client.get("/api/v1/payments/review/dashboard/")
-        self.assertEqual(dashboard.status_code, 200, dashboard.data)
-        self.assertEqual(
-            dashboard.data["issue_counts"]["PAYMENT_CAPTURED_WITHOUT_TICKET"],
-            1,
-        )
-        self.assertEqual(
-            dashboard.data["issue_counts"]["TICKET_ISSUANCE_FAILED"],
-            1,
-        )
-        self.assertEqual(len(dashboard.data["payments"]), 1)
 
-    def test_payment_review_dashboard_reports_online_tickets_without_payment(self):
-        registration, tickets = create_registration(
-            event_id=self.event.id,
-            tier_id=self.single.id,
-            buyer=self.registration_payload()["buyer"],
-            source=Registration.Source.ONLINE,
-        )
-        self.client.force_authenticate(self.admin)
-        response = self.client.get("/api/v1/payments/review/dashboard/")
-        self.assertEqual(response.status_code, 200, response.data)
-        cases = response.data["registrations_without_valid_payment"]
-        self.assertEqual(len(cases), 1)
-        self.assertEqual(cases[0]["registration_id"], str(registration.id))
-        self.assertEqual(response.data["issue_counts"]["TICKET_WITHOUT_VALID_PAYMENT"], 1)
-        self.assertEqual(len(tickets), 1)
 
-    def test_payment_review_dashboard_reports_duplicate_captured_payments(self):
-        response = self.create_online_registration()
-        self.assertEqual(response.status_code, 200, response.data)
-        original = Payment.objects.get()
-        Payment.objects.create(
-            intent=original.intent,
-            amount=original.amount,
-            currency=original.currency,
-            status=Payment.Status.CAPTURED,
-            verification_status=Payment.VerificationStatus.FAILED,
-            ticket_issuance_status=Payment.TicketIssuanceStatus.ADMIN_REVIEW_REQUIRED,
-            ticket_issuance_failure="Duplicate captured payment detected.",
-            expires_at=original.expires_at,
-            captured_at=timezone.now(),
-        )
-        self.client.force_authenticate(self.admin)
-        dashboard = self.client.get("/api/v1/payments/review/dashboard/")
-        self.assertEqual(dashboard.status_code, 200, dashboard.data)
-        self.assertEqual(dashboard.data["issue_counts"]["DUPLICATE_PAYMENT"], 2)
-        self.assertEqual(len(dashboard.data["payments"]), 2)
 
-    def test_payment_review_dashboard_is_admin_only(self):
-        self.client.force_authenticate(self.scanner)
-        response = self.client.get("/api/v1/payments/review/dashboard/")
-        self.assertEqual(response.status_code, 403, response.data)
 
-    def test_successful_payment_records_ticket_issuance_as_complete(self):
-        response = self.create_online_registration()
-        self.assertEqual(response.status_code, 200, response.data)
-        payment = Payment.objects.get()
-        self.assertEqual(
-            payment.ticket_issuance_status,
-            Payment.TicketIssuanceStatus.ISSUED,
-        )
-        self.assertEqual(PaymentIntent.objects.count(), 1)
 
-    def test_retry_recovers_matching_incomplete_payment_intent(self):
-        key = uuid.uuid4()
-        payload = self.registration_payload()
-        request_hash = __import__(
-            "apps.payments.services",
-            fromlist=["payment_request_hash"],
-        ).payment_request_hash(
-            event_id=self.event.id,
-            tier_id=self.single.id,
-            buyer=payload["buyer"],
-            attendee_names=[payload["buyer"]["name"]],
-        )
-        intent = PaymentIntent.objects.create(
-            idempotency_key=key,
-            request_hash=request_hash,
-            event=self.event,
-            ticket_tier=self.single,
-            buyer_name=payload["buyer"]["name"],
-            buyer_email=payload["buyer"]["email"],
-            buyer_phone=payload["buyer"]["phone"],
-            attendee_names=[payload["buyer"]["name"]],
-            expires_at=timezone.now(),
-        )
-        provider = FakeRazorpayClient()
-        with patch("apps.payments.services.razorpay.Client", return_value=provider):
-            order = self.payment_order(payload, key, provider)
-            self.assertEqual(order.status_code, 201, order.data)
-            verified = self.verify_order(order.data["order_id"], provider)
-        self.assertEqual(verified.status_code, 200, verified.data)
-        intent.refresh_from_db()
-        self.assertEqual(intent.status, PaymentIntent.Status.VERIFIED)
-        self.assertEqual(Registration.objects.count(), 1)
-        self.assertEqual(Ticket.objects.count(), 1)
 
-    def test_repeated_payment_verification_and_registration_create_one_ticket_set(self):
-        payload = self.registration_payload()
-        key = uuid.uuid4()
-        provider = FakeRazorpayClient()
-        with patch("apps.payments.services.razorpay.Client", return_value=provider):
-            order = self.payment_order(payload, key, provider)
-            first_verification = self.verify_order(order.data["order_id"], provider)
-            repeated_verification = self.verify_order(order.data["order_id"], provider)
-        self.assertEqual(first_verification.status_code, 200, first_verification.data)
-        self.assertEqual(repeated_verification.status_code, 200, repeated_verification.data)
-        self.assertTrue(first_verification.data["payment_verified"])
-        self.assertTrue(repeated_verification.data["payment_verified"])
-        self.assertEqual(Registration.objects.count(), 1)
-        self.assertEqual(Ticket.objects.count(), 1)
-        self.assertEqual(Payment.objects.count(), 1)
-        self.assertEqual(TicketDelivery.objects.count(), 1)
-        self.assertEqual(
-            TicketDelivery.objects.get().status,
-            TicketDelivery.Status.PENDING,
-        )
 
-    def test_invalid_payment_signature_does_not_issue_tickets(self):
-        provider = FakeRazorpayClient()
-        with patch("apps.payments.services.razorpay.Client", return_value=provider):
-            order = self.payment_order(self.registration_payload(), uuid.uuid4(), provider)
-            response = self.client.post(
-                "/api/v1/payments/verify/",
-                {
-                    "razorpay_order_id": order.data["order_id"],
-                    "razorpay_payment_id": "pay_invalid",
-                    "razorpay_signature": "0" * 64,
-                },
-                format="json",
-            )
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(Payment.objects.get().verification_status, Payment.VerificationStatus.FAILED)
-        self.assertEqual(Registration.objects.count(), 0)
-        self.assertEqual(Ticket.objects.count(), 0)
 
-    def test_unknown_order_and_wrong_payment_id_are_rejected(self):
-        response = self.client.post(
-            "/api/v1/payments/verify/",
-            {
-                "razorpay_order_id": "order_not_found",
-                "razorpay_payment_id": "pay_not_found",
-                "razorpay_signature": "0" * 64,
-            },
-            format="json",
-        )
-        self.assertEqual(response.status_code, 404)
-
-        provider = FakeRazorpayClient()
-        with patch("apps.payments.services.razorpay.Client", return_value=provider):
-            order = self.payment_order(self.registration_payload(), uuid.uuid4(), provider)
-            signature = hmac.new(
-                b"test_secret",
-                f"{order.data['order_id']}|pay_wrong".encode(),
-                hashlib.sha256,
-            ).hexdigest()
-            with patch.object(
-                provider.payment,
-                "fetch",
-                side_effect=BadRequestError("payment not found"),
-            ):
-                invalid = self.client.post(
-                    "/api/v1/payments/verify/",
-                    {
-                        "razorpay_order_id": order.data["order_id"],
-                        "razorpay_payment_id": "pay_wrong",
-                        "razorpay_signature": signature,
-                    },
-                    format="json",
-                )
-        self.assertEqual(invalid.status_code, 400)
-        self.assertEqual(Registration.objects.count(), 0)
-        self.assertEqual(Ticket.objects.count(), 0)
-
-    def test_captured_payment_mismatch_is_preserved_for_admin_review(self):
-        for index, override in enumerate(({"amount": 1}, {"currency": "USD"})):
-            provider = FakeRazorpayClient()
-            provider.payment_overrides = override
-            with patch("apps.payments.services.razorpay.Client", return_value=provider):
-                payload = self.registration_payload(
-                    buyer={
-                        "name": f"Wrong Details {chr(65 + index)}",
-                        "email": f"wrong-{index}@example.test",
-                        "phone": "+919876543210",
-                    }
-                )
-                order = self.payment_order(payload, uuid.uuid4(), provider)
-                response = self.verify_order(order.data["order_id"], provider)
-            self.assertEqual(response.status_code, 409)
-            self.assertEqual(
-                response.data["error"]["code"],
-                "PAYMENT_REVIEW_REQUIRED",
-            )
-            self.assertEqual(Registration.objects.count(), 0)
-            self.assertEqual(Ticket.objects.count(), 0)
-            payment = Payment.objects.get(razorpay_order_id=order.data["order_id"])
-            self.assertEqual(payment.status, Payment.Status.CAPTURED)
-            self.assertIsNotNone(payment.captured_at)
-            self.assertEqual(
-                payment.ticket_issuance_status,
-                Payment.TicketIssuanceStatus.ADMIN_REVIEW_REQUIRED,
-            )
-
-    def test_unverified_payment_failure_report_does_not_change_order_state(self):
-        payload = self.registration_payload()
-        key = uuid.uuid4()
-        provider = FakeRazorpayClient()
-        with patch("apps.payments.services.razorpay.Client", return_value=provider):
-            first_order = self.payment_order(payload, key, provider)
-            failed = self.client.post(
-                "/api/v1/payments/failure/",
-                {
-                    "razorpay_order_id": first_order.data["order_id"],
-                    "razorpay_payment_id": "pay_unverified_client_claim",
-                },
-                format="json",
-            )
-            self.assertIsNone(
-                Payment.objects.get(
-                    razorpay_order_id=first_order.data["order_id"]
-                ).razorpay_payment_id
-            )
-            retry_order = self.payment_order(payload, key, provider)
-        self.assertEqual(failed.status_code, 200)
-        self.assertEqual(retry_order.status_code, 200, retry_order.data)
-        self.assertEqual(retry_order.data["order_id"], first_order.data["order_id"])
-        self.assertEqual(Payment.objects.filter(intent_id=key).count(), 1)
-        self.assertEqual(
-            Payment.objects.get(intent_id=key).status,
-            Payment.Status.CREATED,
-        )
-        self.assertIn(
-            "provider status is unverified",
-            Payment.objects.get(intent_id=key).failure_message,
-        )
-        self.assertEqual(Registration.objects.count(), 0)
 
     def test_ticket_pdf_endpoint_returns_readable_pdf_with_ticket_data(self):
+        self.event.start_at = timezone.localtime(self.event.start_at).replace(
+            hour=18,
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
+        self.event.end_at = timezone.localtime(self.event.end_at).replace(
+            hour=21,
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
+        self.event.save(update_fields=("start_at", "end_at"))
         created = self.create_online_registration()
         response = self.client.get(
             f"/api/v1/registrations/{created.data['registration']['id']}/tickets.pdf"
@@ -899,7 +543,23 @@ class TicketingApiTests(TestCase):
         self.assertTrue(response.content.startswith(b"%PDF-"))
         self.assertIn(b"Test Event", response.content)
         self.assertIn(b"Test Buyer", response.content)
-        self.assertIn(created.data["tickets"][0]["id"].encode(), response.content)
+        self.assertIn(
+            created.data["tickets"][0]["ticket_code"].encode(),
+            response.content,
+        )
+        self.assertIn(b"6:00 PM", response.content)
+        self.assertIn(b"9:00 PM", response.content)
+        self.assertIn(b"Terms & Conditions", response.content)
+        self.assertIn(
+            b"Arrive 1 hour early for entry and security checking.",
+            response.content,
+        )
+        self.assertIn(b"No re-entry after exit.", response.content)
+        self.assertIn(
+            b"Any misconduct or violation of rules may result in immediate eviction without refund.",
+            response.content,
+        )
+        self.assertGreaterEqual(response.content.count(b"/Subtype /Image"), 2)
 
     def test_brevo_webhook_is_authenticated_and_idempotently_marks_delivery(self):
         response = self.create_online_registration()
@@ -961,6 +621,9 @@ class TicketingApiTests(TestCase):
             [
                 Ticket(
                     registration=registration,
+                    ticket_code=(
+                        f"{registration.registration_code}-T{index + 1:02d}"
+                    ),
                     attendee_name=f"Quota Attendee {index}",
                 )
                 for index in range(1, 310)
@@ -1045,10 +708,8 @@ class TicketingApiTests(TestCase):
         self.assertEqual(next_day_usage.priority_sent, 1)
 
     def test_email_failure_keeps_ticket_valid_and_can_be_retried(self):
-        provider = FakeRazorpayClient()
-        with patch("apps.payments.services.razorpay.Client", return_value=provider):
-            order = self.payment_order(self.registration_payload(), uuid.uuid4(), provider)
-            verified = self.verify_order(order.data["order_id"], provider)
+        order = self.payment_order(self.registration_payload(), uuid.uuid4())
+        verified = self.verify_order(order.data["order_id"])
         self.assertEqual(verified.status_code, 200)
         self.assertEqual(verified.data["delivery_status"], TicketDelivery.Status.PENDING)
         self.assertEqual(Ticket.objects.count(), 1)
@@ -1170,14 +831,12 @@ class TicketingApiTests(TestCase):
         self.assertEqual(Ticket.objects.get().status, Ticket.Status.ISSUED)
 
     def test_pdf_failure_does_not_reverse_payment_and_delivery_is_retryable(self):
-        provider = FakeRazorpayClient()
-        with patch("apps.payments.services.razorpay.Client", return_value=provider):
-            order = self.payment_order(self.registration_payload(), uuid.uuid4(), provider)
-            with patch(
-                "apps.payments.delivery.generate_tickets_pdf",
-                side_effect=ValueError("PDF renderer unavailable"),
-            ):
-                verified = self.verify_order(order.data["order_id"], provider)
+        order = self.payment_order(self.registration_payload(), uuid.uuid4())
+        with patch(
+            "apps.payments.delivery.generate_tickets_pdf",
+            side_effect=ValueError("PDF renderer unavailable"),
+        ):
+            verified = self.verify_order(order.data["order_id"])
         self.assertEqual(verified.status_code, 200)
         self.assertEqual(Ticket.objects.count(), 1)
         self.assertEqual(

@@ -15,6 +15,7 @@ class Ticket(models.Model):
         CANCELLED = "CANCELLED", "Cancelled"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    ticket_code = models.CharField(max_length=40, unique=True)
     registration = models.ForeignKey("registrations.Registration", on_delete=models.PROTECT, related_name="tickets")
     attendee_name = models.CharField(max_length=200, blank=True, default="")
     token = models.CharField(max_length=64, unique=True, default=create_ticket_token, editable=False)
@@ -44,4 +45,4 @@ class Ticket(models.Model):
         ]
 
     def __str__(self):
-        return f"Ticket {self.id}"
+        return f"Ticket {self.ticket_code}"

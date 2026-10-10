@@ -11,7 +11,9 @@ import {
 
 export interface ApiTicket {
   id: string;
+  ticket_code: string;
   registration_id: string;
+  registration_code: string;
   event_id: string;
   event_name: string;
   buyer_name: string;
@@ -33,6 +35,7 @@ export interface ApiTicket {
 
 export interface ApiRegistration {
   id: string;
+  registration_code: string;
   event_id: string;
   event_name: string;
   buyer: {
@@ -79,7 +82,9 @@ export const mapEvent = (event: ApiEvent): EventItem => event;
 
 export const mapTicket = (ticket: ApiTicket): Ticket => ({
   id: ticket.id,
+  ticketCode: ticket.ticket_code,
   registrationId: ticket.registration_id,
+  registrationCode: ticket.registration_code,
   eventId: ticket.event_id,
   eventName: ticket.event_name,
   attendeeName: ticket.attendee_name || ticket.buyer_name,
@@ -101,6 +106,7 @@ export const mapRegistration = (registration: ApiRegistration): Registration => 
   const ticketIds = registration.tickets?.map((ticket) => ticket.id) ?? registration.ticket_ids ?? [];
   return {
     id: registration.id,
+    registrationCode: registration.registration_code,
     eventId: registration.event_id,
     eventName: registration.event_name,
     attendee: {

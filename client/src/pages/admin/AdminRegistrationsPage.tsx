@@ -56,6 +56,7 @@ export const AdminRegistrationsPage: React.FC = () => {
 
   const filteredRegistrations = registrations.filter((r) => {
     const matchesSearch = !search.trim() || 
+      (r.registrationCode || '').toLowerCase().includes(search.toLowerCase()) ||
       r.id.toLowerCase().includes(search.toLowerCase()) ||
       r.attendee.fullName.toLowerCase().includes(search.toLowerCase()) ||
       r.attendee.email.toLowerCase().includes(search.toLowerCase()) ||
@@ -159,7 +160,7 @@ export const AdminRegistrationsPage: React.FC = () => {
                   filteredRegistrations.map((reg) => (
                     <tr key={reg.id} className="hover:bg-slate-800/40 transition-colors">
                       <td className="py-3.5 px-4 font-mono font-semibold text-indigo-400">
-                        {reg.id}
+                        {reg.registrationCode || reg.id}
                       </td>
 
                       <td className="py-3.5 px-4">
@@ -247,7 +248,7 @@ export const AdminRegistrationsPage: React.FC = () => {
           isOpen={!!selectedReg}
           onClose={() => setSelectedReg(null)}
           title="Registration Details"
-          description={selectedReg ? `Manifest entry for ${selectedReg.id}` : ''}
+          description={selectedReg ? `Manifest entry for ${selectedReg.registrationCode || selectedReg.id}` : ''}
         >
           {selectedReg && (
             <div className="space-y-4 text-xs">

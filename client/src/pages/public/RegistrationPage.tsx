@@ -2,7 +2,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { eventsApi, FEATURED_EVENT_SLUG } from '../../api/events';
 import { paymentsApi } from '../../api/payments';
-import { clearRegistrationIdempotencyKey } from '../../api/registrations';
+import {
+  clearRegistrationIdempotencyKey,
+  registrationIdempotencyStorageKey,
+} from '../../api/registrations';
 import { mapRegistration, mapTicket } from '../../api/serializers';
 import { EventItem } from '../../types';
 import { Navbar } from '../../components/common/Navbar';
@@ -18,15 +21,6 @@ import {
   MapPin,
   AlertCircle,
 } from 'lucide-react';
-
-declare global {
-  interface Window {
-    Razorpay?: new (options: Record<string, unknown>) => {
-      open: () => void;
-      on: (event: string, callback: (payload: Record<string, unknown>) => void) => void;
-    };
-  }
-}
 
 export const RegistrationPage: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -76,16 +70,6 @@ export const RegistrationPage: React.FC = () => {
     });
     return () => { cancelled = true; };
   }, [searchParams]);
-
-  useEffect(() => {
-    if (document.getElementById('razorpay-checkout-script')) return;
-
-    const script = document.createElement('script');
-    script.id = 'razorpay-checkout-script';
-    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-    script.async = true;
-    document.body.appendChild(script);
-  }, []);
 
   if (loadingEvent) {
     return (
@@ -261,137 +245,34 @@ export const RegistrationPage: React.FC = () => {
         });
         return;
       }
-      if (!order.key_id || !order.order_id || !order.amount || !order.currency) {
+      if (!order.checkout_url || !order.payment_params || !order.order_id) {
         throw new Error('Payment is not configured for this event right now. Please try again later.');
       }
 
-      const recoveryKey = `ticketing.payment-recovery.${order.idempotency_key}`;
-      const serializedRecovery = sessionStorage.getItem(recoveryKey);
-      if (serializedRecovery) {
-        let recovery: {
-          order_id?: string;
-          razorpay_order_id?: string;
-          razorpay_payment_id?: string;
-          razorpay_signature?: string;
-        };
-        try {
-          recovery = JSON.parse(serializedRecovery) as typeof recovery;
-        } catch {
-          sessionStorage.removeItem(recoveryKey);
-          recovery = {};
-        }
-        if (
-          recovery.razorpay_order_id === order.order_id &&
-          recovery.razorpay_payment_id &&
-          recovery.razorpay_signature
-        ) {
-          const verified = await paymentsApi.verify({
-            razorpay_order_id: recovery.razorpay_order_id,
-            razorpay_payment_id: recovery.razorpay_payment_id,
-            razorpay_signature: recovery.razorpay_signature,
-          });
-          sessionStorage.removeItem(recoveryKey);
-          await clearRegistrationIdempotencyKey(registrationParams);
-          await showVerifiedRegistration(verified);
-          return;
-        }
-      }
-
-      const Razorpay = window.Razorpay;
-      if (!Razorpay) {
-        throw new Error('Razorpay checkout is unavailable in this browser.');
-      }
-
-      let paymentCallbackStarted = false;
-      const razorpayInstance = new Razorpay({
-        key: order.key_id,
-        amount: order.amount,
-        currency: order.currency,
-        name: event.name,
-        description: selectedTier.name,
-        order_id: order.order_id,
-        prefill: {
-          name: fullName,
-          email,
-          contact: `+91${phone}`,
-        },
-        theme: {
-          color: '#b71959',
-        },
-        handler: async (paymentResponse: Record<string, unknown>) => {
-          if (paymentCallbackStarted) return;
-          paymentCallbackStarted = true;
-          let paymentVerified = false;
-          try {
-            const razorpayOrderId = paymentResponse.razorpay_order_id;
-            const razorpayPaymentId = paymentResponse.razorpay_payment_id;
-            const razorpaySignature = paymentResponse.razorpay_signature;
-            if (
-              typeof razorpayOrderId !== 'string' ||
-              typeof razorpayPaymentId !== 'string' ||
-              typeof razorpaySignature !== 'string'
-            ) {
-              throw new Error('Razorpay returned an incomplete payment response.');
-            }
-            sessionStorage.setItem(
-              recoveryKey,
-              JSON.stringify({
-                razorpay_order_id: razorpayOrderId,
-                razorpay_payment_id: razorpayPaymentId,
-                razorpay_signature: razorpaySignature,
-              }),
-            );
-            const verification = await paymentsApi.verify({
-              razorpay_order_id: razorpayOrderId,
-              razorpay_payment_id: razorpayPaymentId,
-              razorpay_signature: razorpaySignature,
-            });
-            if (!verification.payment_verified) {
-              throw new Error('Payment verification failed. Contact the event team before trying again.');
-            }
-            paymentVerified = true;
-            sessionStorage.removeItem(recoveryKey);
-            await clearRegistrationIdempotencyKey(registrationParams);
-            await showVerifiedRegistration(verification);
-          } catch (error: unknown) {
-            setErrorMessage(
-              paymentVerified
-                ? `Payment was verified and your tickets are being prepared: ${error instanceof Error ? error.message : 'Unexpected error.'} Retry this registration with the same details to recover the confirmation.`
-                : `We could not confirm the payment response: ${error instanceof Error ? error.message : 'Unexpected error.'} Your payment details have been retained for safe retry. Do not pay again until you retry this registration.`,
-            );
-            submittingRef.current = false;
-            setIsSubmitting(false);
-          }
-        },
-        modal: {
-          ondismiss: () => {
-            submittingRef.current = false;
-            setIsSubmitting(false);
-          },
-        },
+      const idempotencyStorageKey =
+        await registrationIdempotencyStorageKey(registrationParams);
+      sessionStorage.setItem(
+        `ticketing.payment-idempotency.${order.order_id}`,
+        order.idempotency_key,
+      );
+      sessionStorage.setItem(
+        `ticketing.payment-idempotency-storage.${order.order_id}`,
+        idempotencyStorageKey,
+      );
+      const form = document.createElement('form');
+      form.method = 'POST';
+      form.action = order.checkout_url;
+      form.acceptCharset = 'UTF-8';
+      form.hidden = true;
+      Object.entries(order.payment_params).forEach(([name, value]) => {
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = name;
+        input.value = value;
+        form.appendChild(input);
       });
-
-      razorpayInstance.on('payment.failed', (failure: Record<string, unknown>) => {
-        const details = failure.error;
-        void paymentsApi.recordFailure({
-          razorpay_order_id: order.order_id!,
-        }).catch((error: unknown) => {
-          console.error('Unable to record Razorpay payment failure.', error);
-        });
-        const message =
-          typeof details === 'object' && details !== null
-            ? 'description' in details && typeof details.description === 'string'
-              ? details.description
-              : 'reason' in details && typeof details.reason === 'string'
-                ? details.reason
-                : 'Payment failed. Please try again.'
-            : 'Payment failed. Please try again.';
-        setErrorMessage(message);
-        submittingRef.current = false;
-        setIsSubmitting(false);
-      });
-
-      razorpayInstance.open();
+      document.body.appendChild(form);
+      form.submit();
     } catch (err: unknown) {
       setErrorMessage(err instanceof Error ? err.message : 'Registration failed. Please try again.');
       submittingRef.current = false;
@@ -568,6 +449,9 @@ export const RegistrationPage: React.FC = () => {
                       className="w-full min-w-0 bg-transparent px-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none"
                     />
                   </div>
+                  <p className="mt-1.5 text-[10px] text-slate-400">
+                    Please provide your registered WhatsApp number. Your ticket will be sent to this number.
+                  </p>
                   {fieldErrors.phone && (
                     <p id="attendee-phone-error" className="text-xs text-rose-400 mt-1">{fieldErrors.phone}</p>
                   )}
@@ -828,7 +712,7 @@ export const RegistrationPage: React.FC = () => {
                 className="max-h-56 overflow-y-auto rounded-xl border border-slate-800 bg-slate-950/60 p-4 text-xs text-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500"
               >
                 <ul className="list-disc space-y-2 pl-5">
-                  <li>Carry your ticket and valid ID. Arrive 1 hour early for entry and security checking.</li>
+                  <li>Carry your ticket and valid ID. Report to the venue at least 1 hour before the event starts for entry and security checking.</li>
                   <li>Tickets are non-transferable and non-refundable. No re-entry after exit.</li>
                   <li>One pair of Dandiya sticks and refreshments are included with each ticket.</li>
                   <li>Traditional/ethnic wear is recommended.</li>

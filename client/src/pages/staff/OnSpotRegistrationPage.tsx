@@ -340,12 +340,12 @@ export const OnSpotRegistrationPage: React.FC = () => {
               {generatedTickets.map((ticket, index) => (
                 <div key={ticket.id} className="flex justify-between items-center text-xs">
                   <span className="text-slate-400">Ticket {index + 1} · {ticket.attendeeName}</span>
-                  <span className="font-mono font-bold text-indigo-400">{ticket.id}</span>
+                  <span className="font-mono font-bold text-indigo-400">{ticket.ticketCode || ticket.id}</span>
                 </div>
               ))}
               {generatedTickets.length === 1 && <div className="flex justify-between items-center text-xs">
                 <span className="text-slate-400 uppercase font-semibold">TICKET ID</span>
-                <span className="font-mono font-bold text-indigo-400">{generatedTickets[0].id}</span>
+                <span className="font-mono font-bold text-indigo-400">{generatedTickets[0].ticketCode || generatedTickets[0].id}</span>
               </div>}
               <div className="flex justify-between items-center text-xs">
                 <span className="text-slate-400 uppercase font-semibold">SOURCE</span>

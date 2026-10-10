@@ -37,7 +37,9 @@ class TicketScanSerializer(serializers.ModelSerializer):
 
 class ScannedTicketSerializer(serializers.Serializer):
     id = serializers.UUIDField()
+    ticket_code = serializers.CharField()
     registration_id = serializers.UUIDField()
+    registration_code = serializers.CharField(source="registration.registration_code")
     event_id = serializers.UUIDField(source="registration.event_id")
     event_name = serializers.CharField(source="registration.event.name")
     buyer_name = serializers.CharField(source="registration.buyer_name")

@@ -58,7 +58,8 @@ export interface Attendee {
 }
 
 export interface Registration {
-  id: string; // e.g. "REG-2026-001284"
+  id: string; // Internal registration UUID.
+  registrationCode?: string;
   eventId: string;
   eventName: string;
   attendee: Attendee;
@@ -73,7 +74,9 @@ export interface Registration {
 
 export interface Ticket {
   id: string; // e.g. "TKT-849201"
+  ticketCode?: string;
   registrationId: string;
+  registrationCode?: string;
   eventId: string;
   eventName: string;
   attendeeName: string;

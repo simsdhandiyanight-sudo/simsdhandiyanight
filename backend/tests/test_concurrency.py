@@ -1,13 +1,11 @@
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
-import hashlib
-import hmac
 import json
 import math
 import time
 from threading import Barrier, Lock
 from unittest import skipUnless
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 import uuid
 
 from django.contrib.auth import get_user_model
@@ -24,7 +22,6 @@ from apps.registrations.models import Registration, RegistrationIdempotency
 from apps.registrations.services import RegistrationConflict, create_registration
 from apps.scanning.models import Gate, StaffAssignment
 from apps.tickets.models import Ticket
-from tests.payment_fakes import FakeRazorpayClient
 
 
 class FakeBrevoResponse:
@@ -39,8 +36,10 @@ class FakeBrevoResponse:
 
 @skipUnless(connection.vendor == "postgresql", "Concurrency guarantees require PostgreSQL row locks.")
 @override_settings(
-    RAZORPAY_KEY_ID="rzp_test_id",
-    RAZORPAY_KEY_SECRET="test_secret",
+    PAYU_MERCHANT_KEY="payu-test-key",
+    PAYU_MERCHANT_SALT="payu-test-salt",
+    PAYU_ENVIRONMENT="test",
+    PAYU_FRONTEND_URL="https://tickets.example.test",
     BREVO_API_KEY="brevo-test-key",
     BREVO_SENDER_EMAIL="tickets@example.test",
 )
@@ -67,7 +66,6 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
         )
 
     def setUp(self):
-        self.payment_provider = FakeRazorpayClient()
         start = timezone.now() + timedelta(days=2)
         self.event = Event.objects.create(
             slug="concurrent-event",
@@ -120,6 +118,32 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
             role="ADMIN",
         )
 
+    def _payu_verification_response(self, *args, **kwargs):
+        txnid = kwargs["data"]["var1"]
+        payment = Payment.objects.select_related("intent").get(
+            provider_order_id=txnid
+        )
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {
+            "status": 1,
+            "transaction_details": {
+                txnid: {
+                    "txnid": txnid,
+                    "mihpayid": f"payu-{payment.id.hex}",
+                    "amount": f"{payment.amount / 100:.2f}",
+                    "productinfo": "Dhandiya Night Tickets",
+                    "firstname": payment.intent.buyer_name.strip().split(maxsplit=1)[0][:60],
+                    "email": payment.intent.buyer_email,
+                    "udf1": str(payment.intent_id),
+                    "udf2": str(payment.id),
+                    "status": "success",
+                    "unmappedstatus": "captured",
+                }
+            },
+        }
+        return response
+
     def _request_payload(self, name, email, tier=None):
         return {
             "event_id": str(self.event.id),
@@ -161,20 +185,12 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
                 if spec.get("payment_flow") and response.status_code in (200, 201):
                     order_replayed = response.data["replayed"]
                     order_id = response.data["order_id"]
-                    payment_id = f"pay_{order_id.removeprefix('order_')}"
-                    signature = hmac.new(
-                        b"test_secret",
-                        f"{order_id}|{payment_id}".encode("utf-8"),
-                        hashlib.sha256,
-                    ).hexdigest()
-                    verified = client.post(
-                        "/api/v1/payments/verify/",
+                    verified = client.get(
+                        "/api/v1/payments/status/",
                         {
-                            "razorpay_order_id": order_id,
-                            "razorpay_payment_id": payment_id,
-                            "razorpay_signature": signature,
+                            "txnid": order_id,
+                            "idempotency_key": response.data["payment_params"]["udf1"],
                         },
-                        format="json",
                     )
                     verification_status = verified.status_code
                     if verified.status_code >= 400:
@@ -201,8 +217,8 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
                 connections.close_all()
 
         with patch(
-            "apps.payments.services.razorpay.Client",
-            return_value=self.payment_provider,
+            "apps.payments.services.requests.post",
+            side_effect=self._payu_verification_response,
         ):
             with ThreadPoolExecutor(max_workers=len(specs)) as executor:
                 futures = [
@@ -736,8 +752,8 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
     def _create_and_verify_online(self, payload, key, remote_addr):
         client = APIClient()
         with patch(
-            "apps.payments.services.razorpay.Client",
-            return_value=self.payment_provider,
+            "apps.payments.services.requests.post",
+            side_effect=self._payu_verification_response,
         ):
             order = client.post(
                 "/api/v1/payments/create-order/",
@@ -748,20 +764,12 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
             )
             self.assertEqual(order.status_code, 201, order.data)
             order_id = order.data["order_id"]
-            payment_id = f"pay_{order_id.removeprefix('order_')}"
-            signature = hmac.new(
-                b"test_secret",
-                f"{order_id}|{payment_id}".encode("utf-8"),
-                hashlib.sha256,
-            ).hexdigest()
-            verification = client.post(
-                "/api/v1/payments/verify/",
+            verification = client.get(
+                "/api/v1/payments/status/",
                 {
-                    "razorpay_order_id": order_id,
-                    "razorpay_payment_id": payment_id,
-                    "razorpay_signature": signature,
+                    "txnid": order_id,
+                    "idempotency_key": order.data["payment_params"]["udf1"],
                 },
-                format="json",
             )
         self.assertEqual(verification.status_code, 200, verification.data)
         return order, verification

@@ -12,6 +12,7 @@ export default function AdminPaymentReviewPage() {
   const [dashboard, setDashboard] = useState<PaymentReviewDashboard | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  const [reconciling, setReconciling] = useState<string | null>(null);
 
   const loadDashboard = useCallback(async () => {
     setError('');
@@ -23,6 +24,19 @@ export default function AdminPaymentReviewPage() {
       setLoading(false);
     }
   }, []);
+
+  const reconcile = async (paymentId: string) => {
+    setReconciling(paymentId);
+    setError('');
+    try {
+      await paymentReviewApi.reconcile(paymentId);
+      await loadDashboard();
+    } catch (reconcileError) {
+      setError(reconcileError instanceof Error ? reconcileError.message : 'Unable to reconcile this payment.');
+    } finally {
+      setReconciling(null);
+    }
+  };
 
   useEffect(() => {
     void loadDashboard();
@@ -77,8 +91,8 @@ export default function AdminPaymentReviewPage() {
           <div className="flex items-center gap-3 border-b border-slate-800 p-5">
             <div className="rounded-lg bg-amber-950 p-2 text-amber-300"><CreditCard className="h-4 w-4" /></div>
             <div>
-              <h2 className="font-semibold text-white">Captured payments needing review</h2>
-              <p className="text-xs text-slate-400">Provider capture is retained even when registration or ticket issuance needs investigation.</p>
+              <h2 className="font-semibold text-white">Payments needing review</h2>
+              <p className="text-xs text-slate-400">Unresolved PayU verification and captured payments needing registration or ticket recovery are listed here.</p>
             </div>
           </div>
           {loading && !dashboard ? (
@@ -98,6 +112,7 @@ export default function AdminPaymentReviewPage() {
                     <th className="px-4 py-3">Tickets</th>
                     <th className="px-4 py-3">Issues</th>
                     <th className="px-4 py-3">Recorded failure</th>
+                    <th className="px-4 py-3">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800">
@@ -110,7 +125,11 @@ export default function AdminPaymentReviewPage() {
                       </td>
                       <td className="px-4 py-4 text-slate-300">
                         <p>{payment.currency} {(payment.amount / 100).toFixed(2)}</p>
+                        <p className="mt-1">{payment.provider} · {payment.payment_status}</p>
+                        {payment.provider_status && <p className="mt-1 text-[10px] text-slate-500">Gateway: {payment.provider_status}</p>}
                         <p className="mt-1 font-mono text-[10px] text-slate-500">{payment.order_id ?? payment.payment_id}</p>
+                        {payment.provider_payment_id && <p className="mt-1 font-mono text-[10px] text-slate-500">Payment ref: {payment.provider_payment_id}</p>}
+                        {payment.captured_at && <p className="mt-1 text-[10px] text-slate-500">Captured: {new Date(payment.captured_at).toLocaleString()}</p>}
                       </td>
                       <td className="px-4 py-4 text-slate-300">
                         {payment.ticket_count} / {payment.expected_ticket_count}
@@ -127,6 +146,18 @@ export default function AdminPaymentReviewPage() {
                         </div>
                       </td>
                       <td className="max-w-sm px-4 py-4 text-slate-300">{payment.failure || 'No failure detail recorded.'}</td>
+                      <td className="px-4 py-4">
+                        {payment.provider === 'PAYU' && (
+                          <button
+                            type="button"
+                            onClick={() => void reconcile(payment.payment_id)}
+                            disabled={reconciling !== null}
+                            className="rounded-lg border border-indigo-700 bg-indigo-950 px-3 py-2 text-xs text-indigo-200 hover:bg-indigo-900 disabled:opacity-50"
+                          >
+                            {reconciling === payment.payment_id ? 'Reconciling…' : 'Retry verification'}
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -161,7 +192,7 @@ export default function AdminPaymentReviewPage() {
                 <tbody className="divide-y divide-slate-800">
                   {dashboard.registrations_without_valid_payment.map((registration) => (
                     <tr key={registration.registration_id} className="align-top hover:bg-slate-800/30">
-                      <td className="px-4 py-4 font-mono text-slate-300">{registration.registration_id}</td>
+                      <td className="px-4 py-4 font-mono text-slate-300">{registration.registration_code}</td>
                       <td className="px-4 py-4 text-slate-300">
                         <p className="font-semibold text-white">{registration.buyer_name}</p>
                         <p className="mt-1 text-slate-400">{registration.buyer_email}</p>

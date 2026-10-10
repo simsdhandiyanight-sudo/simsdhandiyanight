@@ -55,6 +55,7 @@ class TicketListView(APIView):
         if search:
             tickets = tickets.filter(
                 Q(id__icontains=search)
+                | Q(ticket_code__icontains=search)
                 | Q(registration__buyer_name__icontains=search)
                 | Q(attendee_name__icontains=search)
                 | Q(registration__buyer_email__icontains=search)
@@ -93,7 +94,9 @@ class TicketPdfView(APIView):
 
         pdf = generate_tickets_pdf([ticket])
         response = HttpResponse(pdf, content_type="application/pdf")
-        response["Content-Disposition"] = f'attachment; filename="ticket-{ticket.id}.pdf"'
+        response["Content-Disposition"] = (
+            f'attachment; filename="ticket-{ticket.ticket_code}.pdf"'
+        )
         response["Cache-Control"] = "private, no-store"
         return response
 
@@ -116,7 +119,7 @@ class RegistrationTicketsPdfView(APIView):
         pdf = generate_tickets_pdf(tickets)
         response = HttpResponse(pdf, content_type="application/pdf")
         response["Content-Disposition"] = (
-            f'attachment; filename="tickets-{registration.id}.pdf"'
+            f'attachment; filename="tickets-{registration.registration_code}.pdf"'
         )
         response["Cache-Control"] = "private, no-store"
         return response

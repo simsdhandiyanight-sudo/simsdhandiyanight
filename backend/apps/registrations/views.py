@@ -77,6 +77,7 @@ class RegistrationListCreateView(APIView):
         if search:
             registrations = registrations.filter(
                 Q(id__icontains=search)
+                | Q(registration_code__icontains=search)
                 | Q(buyer_name__icontains=search)
                 | Q(buyer_email__icontains=search)
                 | Q(buyer_phone__icontains=search)

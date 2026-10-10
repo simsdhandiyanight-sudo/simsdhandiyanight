@@ -1,6 +1,6 @@
 import uuid
 
-from django.db import models
+from django.db import models, transaction
 
 
 class Registration(models.Model):
@@ -9,6 +9,7 @@ class Registration(models.Model):
         ON_SPOT = "ON_SPOT", "On-spot"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    registration_code = models.CharField(max_length=32, unique=True)
     event = models.ForeignKey("events.Event", on_delete=models.PROTECT, related_name="registrations")
     ticket_tier = models.ForeignKey("events.TicketTier", on_delete=models.PROTECT, related_name="registrations")
     buyer_name = models.CharField(max_length=200)
@@ -36,8 +37,33 @@ class Registration(models.Model):
             models.Index(fields=("buyer_email",), name="reg_buyer_email_idx"),
         ]
 
+    def save(self, *args, **kwargs):
+        if not self.registration_code:
+            registration_year = self.event.start_at.year
+            with transaction.atomic():
+                RegistrationSequence.objects.get_or_create(year=registration_year)
+                sequence = RegistrationSequence.objects.select_for_update().get(
+                    year=registration_year
+                )
+                self.registration_code = (
+                    f"SIMS-DN-{registration_year}-{sequence.next_number:05d}"
+                )
+                sequence.next_number += 1
+                sequence.save(update_fields=("next_number",))
+                super().save(*args, **kwargs)
+            return
+        super().save(*args, **kwargs)
+
     def __str__(self):
-        return f"Registration {self.id}"
+        return f"Registration {self.registration_code}"
+
+
+class RegistrationSequence(models.Model):
+    year = models.PositiveSmallIntegerField(primary_key=True)
+    next_number = models.PositiveIntegerField(default=1)
+
+    def __str__(self):
+        return f"Registration sequence {self.year}: {self.next_number}"
 
 
 class RegistrationIdempotency(models.Model):

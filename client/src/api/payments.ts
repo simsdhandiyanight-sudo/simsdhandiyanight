@@ -12,10 +12,12 @@ import {
 export interface PaymentOrderResponse {
   amount?: number;
   currency?: string;
-  order_id?: string;
+  order_id?: string | null;
   display_amount?: number;
-  key_id: string;
+  checkout_url?: string;
+  payment_params?: Record<string, string>;
   payment_verified?: boolean;
+  payment_status?: string;
   registration?: ApiRegistration;
   ticket?: ApiTicket;
   tickets?: ApiTicket[];
@@ -24,12 +26,16 @@ export interface PaymentOrderResponse {
 
 export interface PaymentVerificationResponse {
   payment_verified: boolean;
-  order_id: string;
-  payment_id: string;
-  registration: ApiRegistration;
-  ticket: ApiTicket;
-  tickets: ApiTicket[];
-  delivery_status: string | null;
+  payment_status: string;
+  order_id?: string | null;
+  payment_id?: string | null;
+  registration?: ApiRegistration;
+  ticket?: ApiTicket;
+  tickets?: ApiTicket[];
+  delivery_status?: string | null;
+  verification_status?: string;
+  ticket_issuance_status?: string;
+  verification_message?: string;
 }
 
 export const paymentsApi = {
@@ -44,19 +50,8 @@ export const paymentsApi = {
     return { ...response, idempotency_key: idempotencyKey };
   },
 
-  verify: (payload: {
-    razorpay_order_id: string;
-    razorpay_payment_id: string;
-    razorpay_signature: string;
-  }) =>
-    apiRequest<PaymentVerificationResponse>('/payments/verify/', {
-      method: 'POST',
-      body: jsonBody(payload),
-    }),
-
-  recordFailure: (payload: { razorpay_order_id: string }) =>
-    apiRequest<{ status: string }>('/payments/failure/', {
-      method: 'POST',
-      body: jsonBody(payload),
-    }),
+  status: (txnid: string, idempotencyKey: string) =>
+    apiRequest<PaymentVerificationResponse>(
+      `/payments/status/?txnid=${encodeURIComponent(txnid)}&idempotency_key=${encodeURIComponent(idempotencyKey)}`,
+    ),
 };

@@ -45,9 +45,14 @@ class PaymentIntent(models.Model):
 
 
 class Payment(models.Model):
+    class Provider(models.TextChoices):
+        RAZORPAY = "RAZORPAY", "Razorpay (legacy)"
+        PAYU = "PAYU", "PayU"
+
     class Status(models.TextChoices):
         CREATING = "CREATING", "Creating order"
         CREATED = "CREATED", "Order created"
+        PENDING = "PENDING", "Pending"
         AUTHORIZED = "AUTHORIZED", "Authorized"
         CAPTURED = "CAPTURED", "Captured"
         FAILED = "FAILED", "Failed"
@@ -64,8 +69,15 @@ class Payment(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     intent = models.ForeignKey(PaymentIntent, on_delete=models.PROTECT, related_name="payments")
-    razorpay_order_id = models.CharField(max_length=64, unique=True, null=True, blank=True)
-    razorpay_payment_id = models.CharField(max_length=64, unique=True, null=True, blank=True)
+    provider = models.CharField(
+        max_length=12,
+        choices=Provider.choices,
+        default=Provider.RAZORPAY,
+    )
+    provider_order_id = models.CharField(max_length=64, unique=True, null=True, blank=True)
+    provider_payment_id = models.CharField(max_length=64, unique=True, null=True, blank=True)
+    provider_status = models.CharField(max_length=40, blank=True)
+    payment_method = models.CharField(max_length=40, blank=True)
     amount = models.PositiveIntegerField()
     currency = models.CharField(max_length=3)
     status = models.CharField(max_length=12, choices=Status.choices, default=Status.CREATING)
@@ -84,6 +96,9 @@ class Payment(models.Model):
     expires_at = models.DateTimeField()
     captured_at = models.DateTimeField(null=True, blank=True)
     verified_at = models.DateTimeField(null=True, blank=True)
+    verification_attempt_count = models.PositiveSmallIntegerField(default=0)
+    last_verification_attempt_at = models.DateTimeField(null=True, blank=True)
+    next_verification_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -103,6 +118,69 @@ class Payment(models.Model):
                 name="one_verified_capture_per_payment_intent",
             )
         ]
+
+
+class PaymentVerificationAttempt(models.Model):
+    class Trigger(models.TextChoices):
+        CALLBACK = "CALLBACK", "PayU callback"
+        CLIENT = "CLIENT", "Browser status check"
+        ADMIN = "ADMIN", "Administrator retry"
+        SCHEDULED = "SCHEDULED", "Scheduled reconciliation"
+
+    class Outcome(models.TextChoices):
+        STARTED = "STARTED", "Started"
+        CAPTURED = "CAPTURED", "Captured"
+        PENDING = "PENDING", "Pending"
+        FAILED = "FAILED", "Failed"
+        MISMATCH = "MISMATCH", "Transaction mismatch"
+        AUTH_ERROR = "AUTH_ERROR", "Authentication error"
+        INVALID_REQUEST = "INVALID_REQUEST", "Invalid API request"
+        TRANSACTION_NOT_FOUND = "TRANSACTION_NOT_FOUND", "Transaction not found"
+        API_ERROR = "API_ERROR", "API error"
+        MALFORMED = "MALFORMED", "Malformed response"
+        NETWORK_ERROR = "NETWORK_ERROR", "Network error"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    payment = models.ForeignKey(
+        Payment,
+        on_delete=models.PROTECT,
+        related_name="verification_attempts",
+    )
+    requested_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="payment_verification_attempts",
+    )
+    trigger = models.CharField(max_length=12, choices=Trigger.choices)
+    attempt_number = models.PositiveSmallIntegerField()
+    environment = models.CharField(max_length=12)
+    outcome = models.CharField(
+        max_length=24,
+        choices=Outcome.choices,
+        default=Outcome.STARTED,
+    )
+    http_status = models.PositiveSmallIntegerField(null=True, blank=True)
+    api_status = models.CharField(max_length=24, blank=True)
+    api_message = models.CharField(max_length=300, blank=True)
+    response_schema_valid = models.BooleanField(null=True, blank=True)
+    transaction_found = models.BooleanField(null=True, blank=True)
+    returned_txnid = models.CharField(max_length=64, blank=True)
+    returned_status = models.CharField(max_length=40, blank=True)
+    returned_unmappedstatus = models.CharField(max_length=40, blank=True)
+    returned_amount = models.CharField(max_length=40, blank=True)
+    expected_amount = models.PositiveIntegerField()
+    transaction_id_matches = models.BooleanField(null=True, blank=True)
+    amount_matches = models.BooleanField(null=True, blank=True)
+    booking_fields_match = models.BooleanField(null=True, blank=True)
+    currency_matches = models.BooleanField(null=True, blank=True)
+    retry_after = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [models.Index(fields=("payment", "created_at"))]
 
 
 class TicketDelivery(models.Model):

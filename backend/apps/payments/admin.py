@@ -1,6 +1,12 @@
 from django.contrib import admin
 
-from .models import EmailDailyUsage, Payment, PaymentIntent, TicketDelivery
+from .models import (
+    EmailDailyUsage,
+    Payment,
+    PaymentIntent,
+    PaymentVerificationAttempt,
+    TicketDelivery,
+)
 
 
 @admin.register(PaymentIntent)
@@ -41,8 +47,9 @@ class PaymentIntentAdmin(admin.ModelAdmin):
 class PaymentAdmin(admin.ModelAdmin):
     list_display = (
         "id",
-        "razorpay_order_id",
-        "razorpay_payment_id",
+        "provider",
+        "provider_order_id",
+        "provider_payment_id",
         "amount",
         "currency",
         "status",
@@ -51,21 +58,25 @@ class PaymentAdmin(admin.ModelAdmin):
     )
     list_select_related = ("intent", "intent__event", "intent__registration")
     list_filter = (
+        "provider",
         "status",
         "verification_status",
         "ticket_issuance_status",
         "currency",
         "created_at",
     )
-    search_fields = ("id", "razorpay_order_id", "razorpay_payment_id")
+    search_fields = ("id", "provider_order_id", "provider_payment_id")
     raw_id_fields = ("intent",)
     list_per_page = 25
     show_full_result_count = False
     readonly_fields = (
         "id",
         "intent",
-        "razorpay_order_id",
-        "razorpay_payment_id",
+        "provider",
+        "provider_order_id",
+        "provider_payment_id",
+        "provider_status",
+        "payment_method",
         "amount",
         "currency",
         "status",
@@ -76,9 +87,38 @@ class PaymentAdmin(admin.ModelAdmin):
         "expires_at",
         "captured_at",
         "verified_at",
+        "verification_attempt_count",
+        "last_verification_attempt_at",
+        "next_verification_at",
         "created_at",
         "updated_at",
     )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(PaymentVerificationAttempt)
+class PaymentVerificationAttemptAdmin(admin.ModelAdmin):
+    list_display = (
+        "payment",
+        "attempt_number",
+        "trigger",
+        "environment",
+        "outcome",
+        "http_status",
+        "api_status",
+        "created_at",
+    )
+    list_filter = ("trigger", "environment", "outcome", "created_at")
+    search_fields = ("payment__provider_order_id", "returned_txnid")
+    readonly_fields = tuple(field.name for field in PaymentVerificationAttempt._meta.fields)
+    list_select_related = ("payment",)
+    list_per_page = 50
+    show_full_result_count = False
 
     def has_add_permission(self, request):
         return False

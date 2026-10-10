@@ -5,6 +5,10 @@ export interface PaymentReviewPayment {
   payment_intent_id: string;
   order_id: string | null;
   provider_payment_id: string | null;
+  provider: string;
+  payment_status: string;
+  provider_status: string;
+  captured_at: string | null;
   amount: number;
   currency: string;
   event_id: string;
@@ -14,6 +18,7 @@ export interface PaymentReviewPayment {
   buyer_name: string;
   buyer_email: string;
   registration_id: string | null;
+  registration_code: string | null;
   ticket_count: number;
   expected_ticket_count: number;
   verification_status: string;
@@ -25,6 +30,7 @@ export interface PaymentReviewPayment {
 
 export interface PaymentReviewRegistration {
   registration_id: string;
+  registration_code: string;
   event_id: string;
   event_name: string;
   ticket_tier_id: string;
@@ -48,4 +54,8 @@ export interface PaymentReviewDashboard {
 export const paymentReviewApi = {
   getDashboard: () =>
     apiRequest<PaymentReviewDashboard>('/payments/review/dashboard/'),
+  reconcile: (paymentId: string) =>
+    apiRequest<unknown>(`/payments/review/${encodeURIComponent(paymentId)}/reconcile/`, {
+      method: 'POST',
+    }),
 };

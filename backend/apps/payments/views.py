@@ -1,7 +1,11 @@
 import hmac
+import logging
+from urllib.parse import urlencode
 
 from django.conf import settings
 from django.db import transaction
+from django.http import HttpResponseRedirect
+from django.urls import reverse
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_protect
 from rest_framework import serializers, status
@@ -11,16 +15,21 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsAdministrator
+from apps.audit.models import AuditLog
 from apps.registrations.serializers import CreateRegistrationSerializer
 from .delivery import get_delivery_dashboard, handle_brevo_webhook
 from .models import Payment, TicketDelivery
 from .services import (
+    PaymentReviewRequired,
     PaymentProviderUnavailable,
     create_payment_order,
+    get_payu_payment_status,
     get_payment_review_dashboard,
-    record_payment_failure,
-    verify_payment,
+    process_payu_notification,
+    refresh_payu_payment_status,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def get_idempotency_key(request):
@@ -37,14 +46,14 @@ def get_idempotency_key(request):
         ) from error
 
 
-class RazorpayCreateOrderView(APIView):
+class PayUCreatePaymentView(APIView):
     permission_classes = [AllowAny]
 
     @method_decorator(csrf_protect)
     def post(self, request):
-        if not settings.RAZORPAY_KEY_ID or not settings.RAZORPAY_KEY_SECRET:
+        if not settings.PAYU_FRONTEND_URL:
             raise PaymentProviderUnavailable(
-                "Razorpay test credentials are not configured."
+                "The PayU return page is not configured."
             )
         serializer = CreateRegistrationSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -58,63 +67,66 @@ class RazorpayCreateOrderView(APIView):
             tier_id=validated["ticket_tier_id"],
             buyer=validated["buyer"],
             attendee_names=attendee_names,
+            success_url=settings.PAYU_SUCCESS_URL
+            or request.build_absolute_uri(reverse("payu-success-callback")),
+            failure_url=settings.PAYU_FAILURE_URL
+            or request.build_absolute_uri(reverse("payu-failure-callback")),
         )
         response_status = (
             status.HTTP_200_OK
             if result["replayed"]
             else status.HTTP_201_CREATED
         )
-        result["key_id"] = settings.RAZORPAY_KEY_ID
         return Response(result, status=response_status)
 
 
-class RazorpayVerifyPaymentView(APIView):
+class PayUCallbackView(APIView):
     permission_classes = [AllowAny]
+    authentication_classes = []
 
-    @method_decorator(csrf_protect)
     def post(self, request):
-        if not settings.RAZORPAY_KEY_ID or not settings.RAZORPAY_KEY_SECRET:
-            raise PaymentProviderUnavailable(
-                "Razorpay test credentials are not configured."
-            )
-        serializer = RazorpayVerifyRequestSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        result = verify_payment(
-            order_id=serializer.validated_data["razorpay_order_id"],
-            payment_id=serializer.validated_data["razorpay_payment_id"],
-            signature=serializer.validated_data["razorpay_signature"],
+        txnid = request.data.get("txnid", "")
+        if not isinstance(txnid, str) or not txnid:
+            raise serializers.ValidationError({"txnid": "PayU transaction ID is required."})
+        try:
+            process_payu_notification(request.data)
+        except PaymentProviderUnavailable:
+            logger.warning("PayU callback could not be reconciled; status refresh remains available.")
+        except PaymentReviewRequired:
+            logger.warning("PayU callback payment requires administrator review.")
+        frontend_url = f"{settings.PAYU_FRONTEND_URL.rstrip('/')}/registration/success"
+        return HttpResponseRedirect(
+            f"{frontend_url}?{urlencode({'txnid': txnid})}"
         )
-        return Response(result, status=status.HTTP_200_OK)
 
 
-class RazorpayVerifyRequestSerializer(serializers.Serializer):
-    razorpay_order_id = serializers.CharField(max_length=64, trim_whitespace=True)
-    razorpay_payment_id = serializers.CharField(max_length=64, trim_whitespace=True)
-    razorpay_signature = serializers.RegexField(
-        r"^[a-fA-F0-9]{64}$",
-        max_length=64,
-        trim_whitespace=True,
-    )
-
-
-class RazorpayPaymentFailureView(APIView):
+class PayUWebhookView(APIView):
     permission_classes = [AllowAny]
+    authentication_classes = []
 
-    @method_decorator(csrf_protect)
     def post(self, request):
-        serializer = RazorpayPaymentFailureSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        payment = record_payment_failure(
-            order_id=serializer.validated_data["razorpay_order_id"],
-        )
+        result = process_payu_notification(request.data)
         return Response(
-            {"status": payment.status},
+            {"received": True, "payment_status": result["payment_status"]},
             status=status.HTTP_200_OK,
         )
 
 
-class RazorpayPaymentFailureSerializer(serializers.Serializer):
-    razorpay_order_id = serializers.CharField(max_length=64, trim_whitespace=True)
+class PayUPaymentStatusView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def get(self, request):
+        txnid = serializers.CharField(max_length=25, trim_whitespace=True).run_validation(
+            request.query_params.get("txnid", "")
+        )
+        idempotency_key = serializers.UUIDField().run_validation(
+            request.query_params.get("idempotency_key", "")
+        )
+        result = get_payu_payment_status(txnid, idempotency_key)
+        response = Response(result, status=status.HTTP_200_OK)
+        response["Cache-Control"] = "no-store, private"
+        return response
 
 
 class TicketDeliveryRetryView(APIView):
@@ -174,6 +186,36 @@ class PaymentReviewDashboardView(APIView):
 
     def get(self, request):
         return Response(get_payment_review_dashboard())
+
+
+class PaymentReconcileView(APIView):
+    permission_classes = [IsAuthenticated, IsAdministrator]
+
+    @method_decorator(csrf_protect)
+    def post(self, request, payment_id):
+        payment = Payment.objects.filter(
+            pk=payment_id,
+            provider=Payment.Provider.PAYU,
+        ).first()
+        if payment is None:
+            raise NotFound("The PayU payment was not found.")
+        AuditLog.objects.create(
+            action="PAYU_MANUAL_RECONCILIATION_REQUESTED",
+            resource_type="payment",
+            resource_id=str(payment.id),
+            metadata={
+                "payment_id": str(payment.id),
+                "provider_order_id": payment.provider_order_id,
+                "administrator_id": str(request.user.pk),
+            },
+        )
+        result = refresh_payu_payment_status(
+            payment.provider_order_id,
+            trigger="ADMIN",
+            force=True,
+            requested_by=request.user,
+        )
+        return Response(result)
 
 
 class TicketDeliveryPriorityView(APIView):
