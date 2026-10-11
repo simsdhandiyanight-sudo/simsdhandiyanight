@@ -1092,9 +1092,14 @@ class TicketingApiTests(TestCase):
         self.assertNotIn("Access-Control-Allow-Origin", denied.headers)
 
     def test_dashboard_aggregates_are_database_backed(self):
-        self.create_online_registration(self.combo)
+        registration_response = self.create_online_registration(self.combo)
+        self.approve_ticket_email_for_test(
+            registration_response.data["registration"]["id"]
+        )
         self.client.force_authenticate(self.admin)
         response = self.client.get(f"/api/v1/reports/dashboard/?event_id={self.event.id}")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["registrations"], 1)
+        self.assertEqual(response.data["online_registrations"], 1)
+        self.assertEqual(response.data["paid_online_tickets"], 4)
         self.assertEqual(response.data["active_tickets"], 4)

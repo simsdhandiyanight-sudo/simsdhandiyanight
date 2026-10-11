@@ -14,6 +14,7 @@ from rest_framework.views import APIView
 
 from apps.accounts.permissions import CanScan, IsAdministrator
 from apps.events.models import Event
+from apps.payments.models import Payment, PaymentIntent
 from apps.registrations.models import Registration
 from apps.tickets.models import Ticket
 from .models import TicketScan
@@ -158,6 +159,26 @@ class DashboardSummaryView(APIView):
             active=Count("id", filter=~Q(status=Ticket.Status.CANCELLED)),
             used=Count("id", filter=Q(status=Ticket.Status.USED)),
             cancelled=Count("id", filter=Q(status=Ticket.Status.CANCELLED)),
+            paid_online=Count(
+                "id",
+                distinct=True,
+                filter=(
+                    Q(
+                        registration__source=Registration.Source.ONLINE,
+                        registration__status=Registration.Status.TICKET_ISSUED,
+                        registration__payment_intent__status=PaymentIntent.Status.VERIFIED,
+                        registration__payment_intent__payments__status=Payment.Status.VERIFIED,
+                        registration__payment_intent__payments__verification_status=(
+                            Payment.VerificationStatus.VERIFIED
+                        ),
+                        registration__payment_intent__payments__ticket_issuance_status=(
+                            Payment.TicketIssuanceStatus.ISSUED
+                        ),
+                        registration__payment_intent__payments__verified_at__isnull=False,
+                    )
+                    & ~Q(status=Ticket.Status.CANCELLED)
+                ),
+            ),
         )
         scan_results = list(
             scans.values("result")
@@ -176,6 +197,7 @@ class DashboardSummaryView(APIView):
                 "registrations": reg_stats["total"] or 0,
                 "online_registrations": reg_stats["online"] or 0,
                 "on_spot_registrations": reg_stats["on_spot"] or 0,
+                "paid_online_tickets": ticket_stats["paid_online"] or 0,
                 "active_tickets": ticket_stats["active"] or 0,
                 "used_tickets": ticket_stats["used"] or 0,
                 "cancelled_tickets": ticket_stats["cancelled"] or 0,

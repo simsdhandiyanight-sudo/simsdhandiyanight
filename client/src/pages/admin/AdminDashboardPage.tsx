@@ -47,6 +47,7 @@ export const AdminDashboardPage: React.FC = () => {
 
   const totalRegistrations = summary?.registrations ?? 0;
   const onlineCount = summary?.online_registrations ?? 0;
+  const paidOnlineTicketCount = summary?.paid_online_tickets ?? 0;
   const onSpotCount = summary?.on_spot_registrations ?? 0;
   const checkedInCount = summary?.used_tickets ?? 0;
   const checkInRate =
@@ -104,9 +105,9 @@ export const AdminDashboardPage: React.FC = () => {
           />
 
           <StatCard
-            label="Online Passes"
-            value={onlineCount}
-            subValue={`${Math.round((onlineCount / (totalRegistrations || 1)) * 100)}% of total`}
+            label="Paid Online Tickets"
+            value={paidOnlineTicketCount}
+            subValue="Verified and issued tickets"
             icon={<TicketIcon className="w-4 h-4 text-indigo-400" />}
           />
 

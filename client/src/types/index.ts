@@ -126,6 +126,7 @@ export interface DashboardSummary {
   event_id: string;
   registrations: number;
   online_registrations: number;
+  paid_online_tickets: number;
   on_spot_registrations: number;
   active_tickets: number;
   used_tickets: number;
