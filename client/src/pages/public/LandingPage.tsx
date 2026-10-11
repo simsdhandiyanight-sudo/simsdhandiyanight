@@ -225,7 +225,7 @@ export const LandingPage: React.FC = () => {
               <h2>Come for the music.<br /><em>Stay for the magic.</em></h2>
               <p className="festival-about__body">
                 When the evening lights up, the circle comes alive. Gather your friends for a joyful
-                celebration of Garba, Dandiya, and the colour of tradition—hosted by Daksha Student
+                celebration of Dandiya, and the colour of tradition—hosted by Daksha Student
                 Council and supported by SIMS Rotaract Club at Soundarya Institute.
               </p>
               <div className="festival-about__signature">
