@@ -202,6 +202,56 @@ class ManualPaymentProofTests(TestCase):
         self.assertEqual(Ticket.objects.count(), 0)
         self.assertEqual(Payment.objects.filter(intent=payment.intent).count(), 1)
 
+    def test_quantity_reserves_total_manual_amount_and_issues_unique_tickets(self):
+        payload = {
+            **self.payload,
+            "quantity": 2,
+            "attendee_names": ["Test Buyer", "Second Attendee"],
+        }
+        response = self.client.post(
+            "/api/v1/payments/proof/registrations/",
+            payload,
+            format="json",
+            HTTP_IDEMPOTENCY_KEY=str(uuid.uuid4()),
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["amount"], 298)
+
+        registration = Registration.objects.get(pk=response.data["registration_id"])
+        self.assertEqual(registration.quantity, 2)
+        self.assertEqual(registration.inventory_reservation.units_reserved, 2)
+        submitted = self.submit_proof(response.data)
+        self.assertEqual(submitted.status_code, 201, submitted.data)
+        payment = Payment.objects.get(pk=submitted.data["payment_id"])
+        self.assertEqual(payment.amount, 29_800)
+
+        self.client.force_authenticate(self.admin)
+        approved = self.client.post(
+            f"/api/v1/payments/proof/{payment.pk}/approve/",
+            {"confirmed_received": True},
+            format="json",
+        )
+        self.assertEqual(approved.status_code, 200, approved.data)
+        tickets = list(registration.tickets.order_by("ticket_code"))
+        self.assertEqual([ticket.attendee_name for ticket in tickets], payload["attendee_names"])
+        self.assertEqual(len({ticket.ticket_code for ticket in tickets}), 2)
+
+    def test_manual_quantity_cannot_exceed_remaining_event_capacity(self):
+        self.event.capacity = 1
+        self.event.save(update_fields=("capacity",))
+        response = self.client.post(
+            "/api/v1/payments/proof/registrations/",
+            {
+                **self.payload,
+                "quantity": 2,
+                "attendee_names": ["Test Buyer", "Second Attendee"],
+            },
+            format="json",
+            HTTP_IDEMPOTENCY_KEY=str(uuid.uuid4()),
+        )
+        self.assertEqual(response.status_code, 409, response.data)
+        self.assertEqual(Registration.objects.count(), 0)
+
     def test_ticket_ids_increment_sequentially(self):
         first_registration = self.start_registration()
         first = self.submit_proof(first_registration)

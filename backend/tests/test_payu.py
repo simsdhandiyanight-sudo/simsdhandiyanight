@@ -133,6 +133,61 @@ class PayUPaymentTests(TestCase):
         self.assertEqual(Registration.objects.count(), 0)
         self.assertEqual(Ticket.objects.count(), 0)
 
+    def test_quantity_scales_payu_amount_and_issues_distinct_attendee_tickets(self):
+        payload = {
+            **self.payload,
+            "quantity": 2,
+            "attendee_names": ["Test Buyer", "Second Attendee"],
+        }
+        order = self.create_order(payload=payload)
+        self.assertEqual(order.data["payment_params"]["amount"], "306.00")
+        intent = PaymentIntent.objects.get(pk=order.data["payment_params"]["udf1"])
+        self.assertEqual(intent.quantity, 2)
+        event_response = self.client.get(f"/api/v1/events/{self.event.slug}/")
+        self.assertEqual(event_response.status_code, 200, event_response.data)
+        self.assertEqual(event_response.data["tiers"][0]["available"], 1)
+
+        callback = self.callback_payload(order)
+        with patch(
+            "apps.payments.services.requests.post",
+            return_value=self.payu_response(self.verification_response(order)),
+        ):
+            response = self.client.post(
+                "/api/v1/payments/payu/webhook/",
+                callback,
+                format="multipart",
+            )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        intent.refresh_from_db()
+        registration = Registration.objects.get(pk=intent.registration_id)
+        tickets = list(registration.tickets.order_by("ticket_code"))
+        self.assertEqual(registration.quantity, 2)
+        self.assertEqual([ticket.attendee_name for ticket in tickets], payload["attendee_names"])
+        self.assertEqual(len({ticket.ticket_code for ticket in tickets}), 2)
+
+    def test_quantity_validation_and_event_capacity_limit(self):
+        invalid_quantity = self.client.post(
+            "/api/v1/payments/create-order/",
+            {**self.payload, "quantity": 0},
+            format="json",
+            HTTP_IDEMPOTENCY_KEY=str(uuid.uuid4()),
+        )
+        self.assertEqual(invalid_quantity.status_code, 400)
+
+        over_capacity = self.client.post(
+            "/api/v1/payments/create-order/",
+            {
+                **self.payload,
+                "quantity": 4,
+                "attendee_names": ["One", "Two", "Three", "Four"],
+            },
+            format="json",
+            HTTP_IDEMPOTENCY_KEY=str(uuid.uuid4()),
+        )
+        self.assertEqual(over_capacity.status_code, 409, over_capacity.data)
+        self.assertEqual(PaymentIntent.objects.count(), 0)
+
     def test_duplicate_submission_reuses_transaction_and_reservation(self):
         key = str(uuid.uuid4())
         first = self.client.post(

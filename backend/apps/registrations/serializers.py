@@ -25,11 +25,11 @@ class CreateRegistrationSerializer(serializers.Serializer):
     event_id = serializers.UUIDField()
     ticket_tier_id = serializers.UUIDField()
     buyer = BuyerSerializer()
+    quantity = serializers.IntegerField(min_value=1, default=1)
     attendee_names = serializers.ListField(
         child=serializers.CharField(max_length=200, trim_whitespace=True),
         required=False,
         allow_empty=False,
-        max_length=10,
     )
 
     def validate_attendee_names(self, names):
@@ -82,6 +82,7 @@ class RegistrationTicketSerializer(serializers.Serializer):
 class RegistrationSerializer(serializers.Serializer):
     id = serializers.UUIDField()
     registration_code = serializers.CharField()
+    quantity = serializers.IntegerField()
     event_id = serializers.UUIDField()
     event_name = serializers.CharField(source="event.name")
     buyer = serializers.SerializerMethodField()
@@ -104,6 +105,7 @@ class RegistrationSerializer(serializers.Serializer):
 class RegistrationListSerializer(serializers.Serializer):
     id = serializers.UUIDField()
     registration_code = serializers.CharField()
+    quantity = serializers.IntegerField()
     event_id = serializers.UUIDField()
     event_name = serializers.CharField(source="event.name")
     buyer = serializers.SerializerMethodField()

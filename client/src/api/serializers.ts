@@ -36,6 +36,7 @@ export interface ApiTicket {
 export interface ApiRegistration {
   id: string;
   registration_code: string;
+  quantity?: number;
   event_id: string;
   event_name: string;
   buyer: {

@@ -125,6 +125,7 @@ class OnSpotRegistrationView(APIView):
             buyer=serializer.validated_data["buyer"],
             source=Registration.Source.ON_SPOT,
             created_by=request.user,
+            quantity=serializer.validated_data["quantity"],
             attendee_names=serializer.validated_data.get("attendee_names"),
         )
         response_view = RegistrationListCreateView()

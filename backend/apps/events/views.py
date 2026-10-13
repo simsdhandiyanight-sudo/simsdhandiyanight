@@ -1,4 +1,4 @@
-from django.db.models import Count, OuterRef, Q, Subquery, Sum, Value
+from django.db.models import Count, F, OuterRef, Q, Subquery, Sum, Value
 from django.shortcuts import get_object_or_404
 from django.db.models.functions import Coalesce
 from django.utils import timezone
@@ -11,6 +11,7 @@ from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsAdministrator
 from apps.registrations.models import InventoryReservation
+from apps.payments.models import PaymentIntent
 from apps.tickets.models import Ticket
 from .models import Event
 from .serializers import AdminEventSerializer, PublicEventSerializer, ordinal_day
@@ -27,6 +28,22 @@ def public_events_queryset():
         .annotate(total=Sum("units_reserved"))
         .values("total")[:1]
     )
+    active_payu_reserved_units = (
+        PaymentIntent.objects.filter(
+            event_id=OuterRef("pk"),
+            registration__isnull=True,
+        )
+        .filter(
+            Q(
+                status=PaymentIntent.Status.PENDING,
+                expires_at__gt=timezone.now(),
+            )
+            | Q(status=PaymentIntent.Status.REVIEW_REQUIRED)
+        )
+        .values("event_id")
+        .annotate(total=Sum(F("ticket_tier__admission_count") * F("quantity")))
+        .values("total")[:1]
+    )
     return (
         Event.objects.annotate(
             active_ticket_count=Count(
@@ -41,6 +58,10 @@ def public_events_queryset():
             ),
             active_reserved_units=Coalesce(
                 Subquery(active_reserved_units),
+                Value(0),
+            ),
+            active_payu_reserved_units=Coalesce(
+                Subquery(active_payu_reserved_units),
                 Value(0),
             ),
         )

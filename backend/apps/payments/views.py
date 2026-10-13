@@ -79,6 +79,7 @@ class PayUCreatePaymentView(APIView):
             tier_id=validated["ticket_tier_id"],
             buyer=validated["buyer"],
             attendee_names=attendee_names,
+            quantity=validated["quantity"],
             success_url=settings.PAYU_SUCCESS_URL
             or request.build_absolute_uri(reverse("payu-success-callback")),
             failure_url=settings.PAYU_FAILURE_URL
@@ -107,6 +108,7 @@ class PaymentProofRegistrationView(APIView):
             buyer=validated["buyer"],
             attendee_names=validated.get("attendee_names")
             or [validated["buyer"]["name"]],
+            quantity=validated["quantity"],
         )
         response = Response(
             result,

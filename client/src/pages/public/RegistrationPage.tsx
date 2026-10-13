@@ -39,6 +39,7 @@ export const RegistrationPage: React.FC = () => {
   const [organization, setOrganization] = useState('');
   const [jobTitle, setJobTitle] = useState('');
   const [selectedTierId, setSelectedTierId] = useState<string>('');
+  const [quantity, setQuantity] = useState(1);
   const [attendeeNames, setAttendeeNames] = useState<string[]>([]);
   const [agreeTerms, setAgreeTerms] = useState(false);
   const [readTerms, setReadTerms] = useState(false);
@@ -98,6 +99,8 @@ export const RegistrationPage: React.FC = () => {
   const selectedAdmissionCount = selectedTier?.admissionCount ?? 1;
   const availablePackages = (tier: typeof event.tiers[number]) =>
     Math.min(tier.available, Math.floor((event.capacity - event.registeredCount) / (tier.admissionCount ?? 1)));
+  const maxQuantity = selectedTier ? availablePackages(selectedTier) : 0;
+  const requestedAdmissionCount = selectedAdmissionCount * quantity;
   const registrationAvailable =
     event.status === 'open' &&
     event.registeredCount < event.capacity &&
@@ -160,11 +163,19 @@ export const RegistrationPage: React.FC = () => {
   };
 
   const handleReviewTier = () => {
-    if (selectedTier && selectedAdmissionCount > 1) {
-      const names = [fullName, ...attendeeNames.slice(0, selectedAdmissionCount - 1)];
+    if (
+      !selectedTier
+      || quantity < 1
+      || quantity > availablePackages(selectedTier)
+    ) {
+      setErrorMessage('The selected quantity is no longer available. Choose an available quantity.');
+      return;
+    }
+    if (requestedAdmissionCount > 1) {
+      const names = [fullName, ...attendeeNames.slice(0, requestedAdmissionCount - 1)];
       const hasInvalidName = names.some((name) => getFieldError('fullName', name));
       if (hasInvalidName) {
-        setErrorMessage(`Enter a valid name for each of the ${selectedAdmissionCount} attendees.`);
+        setErrorMessage(`Enter a valid name for each of the ${requestedAdmissionCount} attendees.`);
         return;
       }
     }
@@ -183,6 +194,15 @@ export const RegistrationPage: React.FC = () => {
       setErrorMessage('Select an available ticket offer before continuing.');
       return;
     }
+    if (quantity < 1 || quantity > availablePackages(selectedTier)) {
+      setErrorMessage('The selected quantity is no longer available. Choose an available quantity.');
+      return;
+    }
+    const names = [fullName, ...attendeeNames.slice(0, requestedAdmissionCount - 1)];
+    if (names.length !== requestedAdmissionCount || names.some((name) => getFieldError('fullName', name))) {
+      setErrorMessage(`Enter a valid name for each of the ${requestedAdmissionCount} attendees.`);
+      return;
+    }
 
     submittingRef.current = true;
     setIsSubmitting(true);
@@ -199,6 +219,7 @@ export const RegistrationPage: React.FC = () => {
       const registrationParams = {
         eventId: event.id,
         tierId: selectedTier.id,
+        quantity,
         source: 'ONLINE' as const,
         attendee: {
           fullName: buyer.name,
@@ -207,10 +228,7 @@ export const RegistrationPage: React.FC = () => {
           organization: buyer.organization,
           jobTitle: buyer.job_title,
         },
-        attendeeNames:
-          selectedAdmissionCount > 1
-            ? [fullName, ...attendeeNames.slice(0, selectedAdmissionCount - 1)]
-            : [fullName],
+        attendeeNames: names,
       };
       const reservation = await paymentsApi.startProofRegistration(registrationParams);
       await clearRegistrationIdempotencyKey(registrationParams);
@@ -460,7 +478,11 @@ export const RegistrationPage: React.FC = () => {
                   <button
                     type="button"
                     key={tier.id}
-                    onClick={() => setSelectedTierId(tier.id)}
+                    onClick={() => {
+                      setSelectedTierId(tier.id);
+                      setQuantity(1);
+                      setAttendeeNames([]);
+                    }}
                     disabled={tier.available < 1}
                     aria-pressed={isSelected}
                     className={`w-full p-4 rounded-xl border text-left transition-all disabled:cursor-not-allowed disabled:opacity-50 ${
@@ -488,7 +510,7 @@ export const RegistrationPage: React.FC = () => {
                     <p className="pl-7 text-xs text-slate-400">{tier.description}</p>
                     <p className="pl-7 pt-1 text-[10px] font-mono text-slate-500">
                       {availablePackages(tier) > 0
-                        ? `${availablePackages(tier)} ${(tier.admissionCount ?? 1) > 1 ? 'combo offers' : 'tickets'} available`
+                        ? `${availablePackages(tier)} ${(tier.admissionCount ?? 1) > 1 ? 'combo offers' : 'passes'} available`
                         : 'SOLD OUT'}
                     </p>
 
@@ -507,20 +529,56 @@ export const RegistrationPage: React.FC = () => {
               })}
             </div>
 
-            {selectedTier && selectedAdmissionCount > 1 && (
+            {selectedTier && (
+              <section className="mt-6 border-t border-slate-800 pt-5" aria-labelledby="quantity-heading">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <h3 id="quantity-heading" className="text-sm font-bold text-white">Number of passes</h3>
+                    <p className="mt-1 text-xs text-slate-400">
+                      Up to {maxQuantity} {maxQuantity === 1 ? 'pass' : 'passes'} available
+                    </p>
+                  </div>
+                  <div className="inline-flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-950 p-1">
+                    <button
+                      type="button"
+                      aria-label="Decrease pass quantity"
+                      onClick={() => setQuantity((current) => Math.max(1, current - 1))}
+                      disabled={quantity <= 1}
+                      className="flex h-9 w-9 items-center justify-center rounded-lg text-lg text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      −
+                    </button>
+                    <output aria-live="polite" className="min-w-6 text-center text-sm font-bold text-white">
+                      {quantity}
+                    </output>
+                    <button
+                      type="button"
+                      aria-label="Increase pass quantity"
+                      onClick={() => setQuantity((current) => Math.min(maxQuantity, current + 1))}
+                      disabled={quantity >= maxQuantity}
+                      className="flex h-9 w-9 items-center justify-center rounded-lg text-lg text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+              </section>
+            )}
+
+            {selectedTier && requestedAdmissionCount > 1 && (
               <section className="mt-6 border-t border-slate-800 pt-5" aria-labelledby="combo-attendees-heading">
                 <h3 id="combo-attendees-heading" className="text-sm font-bold text-white">
                   Attendee names <span className="text-rose-400">*</span>
                 </h3>
                 <p className="mt-1 text-xs text-slate-400">
-                  Enter the name for each of the {selectedAdmissionCount} individual tickets. Buyer email and mobile are shared.
+                  Enter the name for each of the {requestedAdmissionCount} individual tickets. Buyer email and mobile are shared.
                 </p>
                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
                   <div>
                     <label className="mb-1.5 block text-xs font-semibold text-slate-300">Attendee 1 name</label>
                     <p className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-2.5 text-xs text-white">{fullName}</p>
                   </div>
-                  {Array.from({ length: selectedAdmissionCount - 1 }, (_, index) => (
+                  {Array.from({ length: requestedAdmissionCount - 1 }, (_, index) => (
                     <div key={index}>
                       <label htmlFor={`combo-attendee-${index + 2}`} className="mb-1.5 block text-xs font-semibold text-slate-300">
                         Attendee {index + 2} name <span className="text-rose-400">*</span>
@@ -626,12 +684,12 @@ export const RegistrationPage: React.FC = () => {
 
               <div className="pt-3 border-t border-slate-800 flex justify-between items-center text-xs">
                 <span className="text-slate-400">
-                  {selectedAdmissionCount > 1
-                    ? `${selectedAdmissionCount - 1} tickets + 1 free • total`
+                  {requestedAdmissionCount > 1
+                    ? `${requestedAdmissionCount} tickets • ${quantity} ${quantity === 1 ? 'pass' : 'passes'} total`
                     : 'Total'}
                 </span>
                 <span className="text-lg font-bold font-mono text-white">
-                  ₹{selectedTier.price}
+                  ₹{selectedTier.price * quantity}
                 </span>
               </div>
             </div>
