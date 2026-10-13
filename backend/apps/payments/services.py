@@ -1522,9 +1522,14 @@ def get_payment_review_dashboard():
     valid_payment_intents = PaymentIntent.objects.filter(
         registration_id=OuterRef("pk"),
         status=PaymentIntent.Status.VERIFIED,
-        payments__status=Payment.Status.CAPTURED,
         payments__verification_status=Payment.VerificationStatus.VERIFIED,
         payments__ticket_issuance_status=Payment.TicketIssuanceStatus.ISSUED,
+    ).filter(
+        Q(payments__status=Payment.Status.CAPTURED)
+        | Q(
+            payments__provider=Payment.Provider.UPI_MANUAL,
+            payments__status=Payment.Status.VERIFIED,
+        )
     )
     registrations_without_valid_payment_queryset = (
         Registration.objects.filter(source=Registration.Source.ONLINE)

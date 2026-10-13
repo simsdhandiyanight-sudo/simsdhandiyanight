@@ -1103,3 +1103,14 @@ class TicketingApiTests(TestCase):
         self.assertEqual(response.data["online_registrations"], 1)
         self.assertEqual(response.data["paid_online_tickets"], 4)
         self.assertEqual(response.data["active_tickets"], 4)
+
+        payment_review = self.client.get("/api/v1/payments/review/dashboard/")
+        self.assertEqual(payment_review.status_code, 200, payment_review.data)
+        self.assertEqual(
+            payment_review.data["issue_counts"]["TICKET_WITHOUT_VALID_PAYMENT"],
+            0,
+        )
+        self.assertEqual(
+            payment_review.data["registrations_without_valid_payment"],
+            [],
+        )
