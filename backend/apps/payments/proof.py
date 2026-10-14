@@ -518,10 +518,13 @@ def approve_manual_payment(*, payment_id, administrator, confirmed_received):
     payment = Payment.objects.select_for_update().get(pk=payment_id)
     if payment.provider != Payment.Provider.UPI_MANUAL:
         raise PaymentProofConflict("Only manual UPI payment proofs can be approved here.")
+    from .sheets import ensure_ticket_sheet_syncs
+
     if (
         payment.status == Payment.Status.VERIFIED
         and registration.status == Registration.Status.TICKET_ISSUED
     ):
+        ensure_ticket_sheet_syncs(registration)
         return {
             "payment_status": payment.status,
             "registration_status": registration.status,
@@ -590,8 +593,6 @@ def approve_manual_payment(*, payment_id, administrator, confirmed_received):
             "updated_at",
         )
     )
-    from .sheets import ensure_ticket_sheet_syncs
-
     ensure_ticket_sheet_syncs(registration, tickets)
 
     PaymentProofDecision.objects.create(

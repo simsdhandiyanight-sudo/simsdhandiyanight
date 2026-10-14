@@ -456,6 +456,33 @@ class TicketSheetSyncTests(TestCase):
         self.assertEqual(sync.attempt_count, 0)
         self.assertEqual(sheets_client.upsert_ticket_row.call_count, 2)
 
+    def test_worker_recovers_queued_job_after_previous_worker_lease_expires(self):
+        ticket = self.make_paid_online_ticket(number=26)
+        sync = TicketSheetSync.objects.get(ticket=ticket)
+        sync.status = TicketSheetSync.Status.PROCESSING
+        sync.attempt_count = 1
+        sync.lease_expires_at = timezone.now() - timedelta(seconds=1)
+        sync.save(
+            update_fields=("status", "attempt_count", "lease_expires_at")
+        )
+        sheets_client = Mock()
+
+        with patch(
+            "apps.payments.management.commands.process_ticket_sheet_syncs.create_google_sheets_client",
+            return_value=sheets_client,
+        ):
+            call_command(
+                "process_ticket_sheet_syncs",
+                "--limit",
+                "50",
+                stdout=StringIO(),
+            )
+
+        sync.refresh_from_db()
+        self.assertEqual(sync.status, TicketSheetSync.Status.SYNCED)
+        self.assertEqual(sync.attempt_count, 0)
+        sheets_client.upsert_ticket_row.assert_called_once()
+
     def test_check_in_updates_the_existing_ticket_row(self):
         _, tickets = self.make_registration(
             source=Registration.Source.ON_SPOT,

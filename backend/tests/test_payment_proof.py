@@ -1,10 +1,12 @@
 import base64
 import uuid
 from datetime import timedelta
+from io import StringIO
 from unittest.mock import MagicMock, patch
 
 import cloudinary.exceptions
 from django.contrib.auth import get_user_model
+from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import DatabaseError
 from django.test import TestCase, override_settings
@@ -17,6 +19,7 @@ from apps.payments.models import (
     PaymentIntent,
     PaymentProofDecision,
     TicketDelivery,
+    TicketSheetSync,
 )
 from apps.payments.cloudinary_storage import (
     PaymentProofStorageUnavailable,
@@ -225,6 +228,7 @@ class ManualPaymentProofTests(TestCase):
         submitted = self.submit_proof(response.data)
         self.assertEqual(submitted.status_code, 201, submitted.data)
         payment = Payment.objects.get(pk=submitted.data["payment_id"])
+        self.assertFalse(TicketSheetSync.objects.exists())
         self.assertEqual(payment.amount, 29_800)
 
         self.client.force_authenticate(self.admin)
@@ -308,6 +312,33 @@ class ManualPaymentProofTests(TestCase):
             ["Test Buyer", "Second Attendee"],
         )
         self.assertEqual(len({ticket.token for ticket in tickets}), 2)
+        self.assertEqual(
+            set(
+                TicketSheetSync.objects.filter(
+                    ticket__registration=registration
+                ).values_list("ticket_id", flat=True)
+            ),
+            {ticket.id for ticket in tickets},
+        )
+        sheets_client = MagicMock()
+        with patch(
+            "apps.payments.management.commands.process_ticket_sheet_syncs.create_google_sheets_client",
+            return_value=sheets_client,
+        ):
+            call_command(
+                "process_ticket_sheet_syncs",
+                "--limit",
+                "50",
+                stdout=StringIO(),
+            )
+        self.assertEqual(sheets_client.upsert_ticket_row.call_count, 2)
+        self.assertEqual(
+            {
+                call.args[1]["ticket_id"]
+                for call in sheets_client.upsert_ticket_row.call_args_list
+            },
+            {str(ticket.pk) for ticket in tickets},
+        )
 
     def test_multiple_ticket_quantity_requires_one_name_per_admission(self):
         response = self.client.post(
@@ -348,6 +379,7 @@ class ManualPaymentProofTests(TestCase):
         self.assertEqual(registration.ticket_id, original_ticket_id)
         self.assertEqual(registration.status, Registration.Status.REJECTED)
         self.assertEqual(registration.tickets.count(), 0)
+        self.assertFalse(TicketSheetSync.objects.exists())
         self.assertEqual(
             registration.inventory_reservation.expires_at,
             payment.rejection_deadline,
@@ -463,6 +495,48 @@ class ManualPaymentProofTests(TestCase):
         self.assertEqual(registration.tickets.count(), 1)
         self.assertEqual(TicketDelivery.objects.filter(ticket__registration=registration).count(), 0)
         self.assertEqual(approved.data["email_status"], "DISABLED")
+        self.assertEqual(
+            TicketSheetSync.objects.filter(
+                ticket__registration=registration,
+                status=TicketSheetSync.Status.PENDING,
+            ).count(),
+            1,
+        )
+
+        TicketSheetSync.objects.filter(ticket__registration=registration).delete()
+        repaired = self.client.post(
+            f"/api/v1/payments/proof/{payment.pk}/approve/",
+            {"confirmed_received": True},
+            format="json",
+        )
+        self.assertEqual(repaired.status_code, 200, repaired.data)
+        self.assertTrue(repaired.data["replayed"])
+        self.assertEqual(
+            TicketSheetSync.objects.filter(ticket__registration=registration).count(),
+            1,
+        )
+
+        sheets_client = MagicMock()
+        with patch(
+            "apps.payments.management.commands.process_ticket_sheet_syncs.create_google_sheets_client",
+            return_value=sheets_client,
+        ):
+            call_command(
+                "process_ticket_sheet_syncs",
+                "--limit",
+                "50",
+                stdout=StringIO(),
+            )
+        sync = TicketSheetSync.objects.get(ticket__registration=registration)
+        self.assertEqual(sync.status, TicketSheetSync.Status.SYNCED)
+        sheets_client.upsert_ticket_row.assert_called_once()
+        sheet_name, sheet_row = sheets_client.upsert_ticket_row.call_args.args
+        ticket = registration.tickets.get()
+        self.assertEqual(sheet_name, "Online_Tickets")
+        self.assertEqual(sheet_row["ticket_id"], str(ticket.pk))
+        self.assertEqual(sheet_row["registration_id"], str(registration.pk))
+        self.assertEqual(sheet_row["payment_status"], Payment.Status.VERIFIED)
+        self.assertEqual(sheet_row["ticket_status"], Ticket.Status.ISSUED)
         self.client.force_authenticate(None)
         with patch(
             "apps.payments.pdf.generate_tickets_pdf",
