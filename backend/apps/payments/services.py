@@ -267,9 +267,9 @@ def create_payment_order(
     idempotency_key,
     event_id,
     tier_id,
-    quantity=1,
     buyer,
     attendee_names,
+    quantity=1,
     success_url,
     failure_url,
 ):
@@ -299,12 +299,14 @@ def create_payment_order(
             raise RegistrationConflict("The selected ticket offer is unavailable.")
         if tier.currency != "INR":
             raise RegistrationConflict("PayU checkout is currently available for INR offers only.")
-        admission_quantity = quantity * tier.admission_count
-        if len(attendee_names) != admission_quantity:
+        admission_count = quantity * tier.admission_count
+        if admission_count > event.capacity:
+            raise RegistrationConflict("The requested ticket quantity exceeds event capacity.")
+        if len(attendee_names) != admission_count:
             raise serializers.ValidationError(
                 {
                     "attendee_names": (
-                        f"Enter a name for each of the {admission_quantity} attendees."
+                        f"Enter a name for each of the {admission_count} attendees."
                     )
                 }
             )
@@ -321,8 +323,8 @@ def create_payment_order(
                     buyer_phone=buyer["phone"],
                     buyer_organization=buyer.get("organization", "").strip(),
                     buyer_job_title=buyer.get("job_title", "").strip(),
-                    attendee_names=[name.strip() for name in attendee_names],
                     quantity=quantity,
+                    attendee_names=[name.strip() for name in attendee_names],
                     expires_at=timezone.now() + ORDER_LIFETIME,
                 )
                 is_new_intent = True
@@ -385,11 +387,13 @@ def create_payment_order(
             )
             .exclude(pk=idempotency_key)
             .aggregate(
-                total=Sum(F("ticket_tier__admission_count") * F("quantity"))
+                total=Sum(
+                    F("ticket_tier__admission_count") * F("quantity")
+                )
             )["total"]
             or 0
         )
-        if active_ticket_count + reserved_count + admission_quantity > event.capacity:
+        if active_ticket_count + reserved_count + admission_count > event.capacity:
             raise RegistrationConflict(
                 "Not enough event capacity remains for this ticket offer."
             )
@@ -400,7 +404,7 @@ def create_payment_order(
         intent.save(update_fields=("status", "expires_at", "updated_at"))
         amount = (
             int(tier.price * 100) * quantity
-            + ADDITIONAL_CHARGE_PER_ADMISSION_PAISE * admission_quantity
+            + ADDITIONAL_CHARGE_PER_ADMISSION_PAISE * admission_count
         )
         payment = Payment.objects.create(
             intent=intent,
@@ -1096,13 +1100,11 @@ def _issue_verified_payment(txnid, *, allow_review_retry=False):
                             "job_title": intent.buyer_job_title,
                         },
                         source=Registration.Source.ONLINE,
-                        attendee_names=intent.attendee_names,
                         quantity=intent.quantity,
+                        attendee_names=intent.attendee_names,
                         exclude_payment_intent_id=intent.idempotency_key,
                     )
-                    if len(tickets) != (
-                        intent.quantity * intent.ticket_tier.admission_count
-                    ):
+                    if len(tickets) != intent.ticket_tier.admission_count * intent.quantity:
                         raise RuntimeError(
                             "Ticket issuance did not create the required admission count."
                         )
@@ -1575,8 +1577,7 @@ def get_payment_review_dashboard():
             "buyer_email": registration.buyer_email,
             "ticket_count": registration.ticket_count,
             "expected_ticket_count": (
-                registration.payment_intent.quantity
-                * registration.ticket_tier.admission_count
+                registration.ticket_tier.admission_count * registration.quantity
             ),
             "created_at": registration.created_at.isoformat(),
             "issue_code": "TICKET_WITHOUT_VALID_PAYMENT",

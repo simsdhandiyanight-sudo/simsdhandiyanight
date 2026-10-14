@@ -86,9 +86,9 @@ def start_payment_proof_registration(
     idempotency_key,
     event_id,
     tier_id,
-    quantity,
     buyer,
     attendee_names,
+    quantity=1,
 ):
     registration, intent, created = create_reserved_registration(
         idempotency_key=idempotency_key,
@@ -113,7 +113,7 @@ def start_payment_proof_registration(
             reservation.expires_at.isoformat() if reservation.expires_at else None
         ),
         "rejection_deadline": None,
-        **_payment_instructions(registration.ticket_tier, intent.quantity),
+        **_payment_instructions(registration.ticket_tier, registration.quantity),
         "replayed": not created,
     }
 
@@ -275,7 +275,7 @@ def _submit_payment_proof_transaction(
                 "The 12-hour correction window has expired. Please contact the event team."
             )
 
-    amount = int(registration.ticket_tier.price * intent.quantity * 100)
+    amount = int(registration.ticket_tier.price * registration.quantity * 100)
     screenshot.seek(0)
     cloudinary_asset = upload_payment_proof(
         screenshot,
@@ -395,7 +395,7 @@ def get_payment_proof_status(*, registration_id, proof_access_token):
         )
     instructions = _payment_instructions(
         registration.ticket_tier,
-        intent.quantity,
+        registration.quantity,
     )
     result = {
         "registration_id": str(registration.pk),
@@ -408,9 +408,7 @@ def get_payment_proof_status(*, registration_id, proof_access_token):
         "applicant_name": registration.buyer_name,
         "applicant_email": registration.buyer_email,
         "ticket_tier_name": registration.ticket_tier.name,
-        "amount": float(
-            registration.ticket_tier.price * intent.quantity
-        ),
+        "amount": instructions["amount"],
         "currency": registration.ticket_tier.currency,
         "reservation_expires_at": (
             reservation.expires_at.isoformat()
@@ -543,10 +541,7 @@ def approve_manual_payment(*, payment_id, administrator, confirmed_received):
         payment.proof_cloudinary_public_id or payment.proof_screenshot is not None
     ):
         raise PaymentProofConflict("A complete payment proof is required before approval.")
-    expected_amount = int(
-        registration.ticket_tier.price * intent.quantity * 100
-    )
-    if payment.amount != expected_amount:
+    if payment.amount != int(registration.ticket_tier.price * registration.quantity * 100):
         raise PaymentProofConflict("The submitted amount does not match the expected ticket fee.")
 
     now = timezone.now()
@@ -575,7 +570,6 @@ def approve_manual_payment(*, payment_id, administrator, confirmed_received):
     tickets = issue_registration_tickets(
         registration=registration,
         attendee_names=intent.attendee_names,
-        quantity=intent.quantity,
     )
     if len(tickets) != reservation.units_reserved:
         raise PaymentProofConflict("Ticket count does not match the reserved inventory.")

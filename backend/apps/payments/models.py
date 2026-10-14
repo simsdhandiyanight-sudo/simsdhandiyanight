@@ -1,6 +1,7 @@
 import uuid
 
 from django.core.exceptions import ValidationError
+from django.core.validators import MinValueValidator
 from django.db import models
 from django.db.models import F, Q
 
@@ -25,8 +26,11 @@ class PaymentIntent(models.Model):
     buyer_phone = models.CharField(max_length=16)
     buyer_organization = models.CharField(max_length=200, blank=True)
     buyer_job_title = models.CharField(max_length=120, blank=True)
+    quantity = models.PositiveIntegerField(
+        default=1,
+        validators=[MinValueValidator(1)],
+    )
     attendee_names = models.JSONField(default=list)
-    quantity = models.PositiveIntegerField(default=1)
     status = models.CharField(max_length=24, choices=Status.choices, default=Status.PENDING)
     registration = models.OneToOneField(
         "registrations.Registration",
@@ -48,6 +52,12 @@ class PaymentIntent(models.Model):
         indexes = [
             models.Index(fields=("event", "status", "expires_at")),
             models.Index(fields=("buyer_email", "created_at")),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(quantity__gte=1),
+                name="payment_intent_quantity_positive",
+            ),
         ]
 
 

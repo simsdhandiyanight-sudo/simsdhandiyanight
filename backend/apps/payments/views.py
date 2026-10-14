@@ -73,9 +73,9 @@ class PayUCreatePaymentView(APIView):
             idempotency_key=get_idempotency_key(request),
             event_id=validated["event_id"],
             tier_id=validated["ticket_tier_id"],
-            quantity=validated["quantity"],
             buyer=validated["buyer"],
             attendee_names=attendee_names,
+            quantity=validated["quantity"],
             success_url=settings.PAYU_SUCCESS_URL
             or request.build_absolute_uri(reverse("payu-success-callback")),
             failure_url=settings.PAYU_FAILURE_URL
@@ -101,10 +101,10 @@ class PaymentProofRegistrationView(APIView):
             idempotency_key=get_idempotency_key(request),
             event_id=validated["event_id"],
             tier_id=validated["ticket_tier_id"],
-            quantity=validated["quantity"],
             buyer=validated["buyer"],
             attendee_names=validated.get("attendee_names")
             or [validated["buyer"]["name"]],
+            quantity=validated["quantity"],
         )
         response = Response(
             result,

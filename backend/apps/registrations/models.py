@@ -1,6 +1,8 @@
 import uuid
 
 from django.db import models, transaction
+from django.db.models import Q
+from django.core.validators import MinValueValidator
 
 
 class Registration(models.Model):
@@ -27,6 +29,10 @@ class Registration(models.Model):
     buyer_phone = models.CharField(max_length=16)
     buyer_organization = models.CharField(max_length=200, blank=True)
     buyer_job_title = models.CharField(max_length=120, blank=True)
+    quantity = models.PositiveIntegerField(
+        default=1,
+        validators=[MinValueValidator(1)],
+    )
     source = models.CharField(max_length=8, choices=Source.choices)
     status = models.CharField(
         max_length=24,
@@ -50,6 +56,12 @@ class Registration(models.Model):
             models.Index(fields=("source", "created_at")),
             models.Index(fields=("-created_at",), name="reg_created_at_desc_idx"),
             models.Index(fields=("buyer_email",), name="reg_buyer_email_idx"),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(quantity__gte=1),
+                name="registration_quantity_positive",
+            ),
         ]
 
     def save(self, *args, **kwargs):

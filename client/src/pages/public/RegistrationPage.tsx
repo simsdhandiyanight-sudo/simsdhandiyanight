@@ -99,11 +99,12 @@ export const RegistrationPage: React.FC = () => {
   const selectedAdmissionCount = selectedTier?.admissionCount ?? 1;
   const availablePackages = (tier: typeof event.tiers[number]) =>
     Math.min(tier.available, Math.floor((event.capacity - event.registeredCount) / (tier.admissionCount ?? 1)));
+  const maxQuantity = selectedTier ? availablePackages(selectedTier) : 0;
+  const requestedAdmissionCount = selectedAdmissionCount * quantity;
   const registrationAvailable =
     event.status === 'open' &&
     event.registeredCount < event.capacity &&
     event.tiers.some((tier) => availablePackages(tier) > 0);
-  const maxQuantity = selectedTier ? availablePackages(selectedTier) : 1;
   const ticketCount = quantity * selectedAdmissionCount;
 
   const clearFieldError = (field: string) => {
@@ -163,7 +164,15 @@ export const RegistrationPage: React.FC = () => {
   };
 
   const handleReviewTier = () => {
-    if (selectedTier && quantity > 0 && quantity <= maxQuantity && selectedAdmissionCount > 1) {
+    if (
+      !selectedTier
+      || quantity < 1
+      || quantity > availablePackages(selectedTier)
+    ) {
+      setErrorMessage('The selected quantity is no longer available. Choose an available quantity.');
+      return;
+    }
+    if (ticketCount > 1) {
       const names = [fullName, ...attendeeNames.slice(0, ticketCount - 1)];
       const hasInvalidName = names.some((name) => getFieldError('fullName', name));
       if (hasInvalidName) {
@@ -188,6 +197,15 @@ export const RegistrationPage: React.FC = () => {
 
     if (!selectedTier) {
       setErrorMessage('Select an available ticket offer before continuing.');
+      return;
+    }
+    if (quantity < 1 || quantity > availablePackages(selectedTier)) {
+      setErrorMessage('The selected quantity is no longer available. Choose an available quantity.');
+      return;
+    }
+    const names = [fullName, ...attendeeNames.slice(0, requestedAdmissionCount - 1)];
+    if (names.length !== requestedAdmissionCount || names.some((name) => getFieldError('fullName', name))) {
+      setErrorMessage(`Enter a valid name for each of the ${requestedAdmissionCount} attendees.`);
       return;
     }
 
@@ -215,10 +233,7 @@ export const RegistrationPage: React.FC = () => {
           organization: buyer.organization,
           jobTitle: buyer.job_title,
         },
-        attendeeNames:
-          selectedAdmissionCount > 1
-            ? [fullName, ...attendeeNames.slice(0, ticketCount - 1)]
-            : Array.from({ length: ticketCount }, () => fullName),
+        attendeeNames: names,
       };
       const reservation = await paymentsApi.startProofRegistration(registrationParams);
       await clearRegistrationIdempotencyKey(registrationParams);
@@ -502,7 +517,7 @@ export const RegistrationPage: React.FC = () => {
                     <p className="pl-7 text-xs text-slate-400">{tier.description}</p>
                     <p className="pl-7 pt-1 text-[10px] font-mono text-slate-500">
                       {availablePackages(tier) > 0
-                        ? `${availablePackages(tier)} ${(tier.admissionCount ?? 1) > 1 ? 'combo offers' : 'tickets'} available`
+                        ? `${availablePackages(tier)} ${(tier.admissionCount ?? 1) > 1 ? 'combo offers' : 'passes'} available`
                         : 'SOLD OUT'}
                     </p>
 
@@ -559,20 +574,20 @@ export const RegistrationPage: React.FC = () => {
               </section>
             )}
 
-            {selectedTier && selectedAdmissionCount > 1 && (
+            {selectedTier && requestedAdmissionCount > 1 && (
               <section className="mt-6 border-t border-slate-800 pt-5" aria-labelledby="combo-attendees-heading">
                 <h3 id="combo-attendees-heading" className="text-sm font-bold text-white">
                   Attendee names <span className="text-rose-400">*</span>
                 </h3>
                 <p className="mt-1 text-xs text-slate-400">
-                  Enter the name for each of the {ticketCount} individual tickets. Buyer email and mobile are shared.
+                  Enter the name for each of the {requestedAdmissionCount} individual tickets. Buyer email and mobile are shared.
                 </p>
                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
                   <div>
                     <label className="mb-1.5 block text-xs font-semibold text-slate-300">Attendee 1 name</label>
                     <p className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-2.5 text-xs text-white">{fullName}</p>
                   </div>
-                  {Array.from({ length: ticketCount - 1 }, (_, index) => (
+                  {Array.from({ length: requestedAdmissionCount - 1 }, (_, index) => (
                     <div key={index}>
                       <label htmlFor={`combo-attendee-${index + 2}`} className="mb-1.5 block text-xs font-semibold text-slate-300">
                         Attendee {index + 2} name <span className="text-rose-400">*</span>

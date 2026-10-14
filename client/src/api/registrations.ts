@@ -42,7 +42,7 @@ export const registrationRequest = (params: RegistrationCreateParams) => {
   return {
     event_id: params.eventId,
     ticket_tier_id: params.tierId,
-    quantity: params.quantity ?? 1,
+    ...(params.quantity && params.quantity > 1 ? { quantity: params.quantity } : {}),
     buyer,
     attendee_names: (params.attendeeNames || [buyer.name]).map((name) => name.trim()),
   };

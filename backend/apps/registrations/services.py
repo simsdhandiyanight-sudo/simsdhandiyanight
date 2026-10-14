@@ -40,8 +40,8 @@ def create_registration(
     buyer,
     source,
     created_by=None,
-    attendee_names=None,
     quantity=1,
+    attendee_names=None,
     exclude_payment_intent_id=None,
     payment_confirmation=None,
 ):
@@ -61,11 +61,16 @@ def create_registration(
     if not tier.is_available and exclude_payment_intent_id is None:
         raise RegistrationConflict("The selected ticket offer is unavailable.")
 
+    if quantity < 1:
+        raise RegistrationConflict("Ticket quantity must be at least one.")
+    admission_count = tier.admission_count * quantity
+    if admission_count > event.capacity:
+        raise RegistrationConflict("The requested ticket quantity exceeds event capacity.")
+
     names = attendee_names or [buyer["name"]]
-    admission_quantity = quantity * tier.admission_count
-    if len(names) != admission_quantity:
+    if len(names) != admission_count:
         raise ValidationError({
-            "attendee_names": f"Enter a name for each of the {admission_quantity} attendees."
+            "attendee_names": f"Enter a name for each of the {admission_count} attendees."
         })
     names = [name.strip() for name in names]
     if any(not name for name in names):
@@ -101,7 +106,7 @@ def create_registration(
     reserved_count = reservations.aggregate(
         total=Sum(F("ticket_tier__admission_count") * F("quantity"))
     )["total"] or 0
-    if active_count + reserved_count + admission_quantity > event.capacity:
+    if active_count + reserved_count + admission_count > event.capacity:
         raise RegistrationConflict("Not enough event capacity remains for this ticket offer.")
 
     existing_reservations = InventoryReservation.objects.filter(
@@ -111,7 +116,7 @@ def create_registration(
     reserved_inventory = existing_reservations.aggregate(
         total=Sum("units_reserved")
     )["total"] or 0
-    if active_count + reserved_count + reserved_inventory + admission_quantity > event.capacity:
+    if active_count + reserved_count + reserved_inventory + admission_count > event.capacity:
         raise RegistrationConflict("Not enough event capacity remains for this ticket offer.")
 
     registration = Registration.objects.create(
@@ -122,6 +127,7 @@ def create_registration(
         buyer_phone=buyer["phone"],
         buyer_organization=buyer.get("organization", "").strip(),
         buyer_job_title=buyer.get("job_title", "").strip(),
+        quantity=quantity,
         source=source,
         status=(
             Registration.Status.PAYMENT_VERIFIED
@@ -188,7 +194,6 @@ def create_registration(
             tickets = issue_registration_tickets(
                 registration=registration,
                 attendee_names=names,
-                quantity=quantity,
             )
             if on_spot_payment is not None:
                 registration.status = Registration.Status.TICKET_ISSUED
@@ -244,23 +249,23 @@ def create_registration(
     return registration, tickets
 
 
-def issue_registration_tickets(*, registration, attendee_names, quantity=1):
-    expected_admissions = quantity * registration.ticket_tier.admission_count
+def issue_registration_tickets(*, registration, attendee_names):
+    admission_count = registration.ticket_tier.admission_count * registration.quantity
     existing_tickets = list(registration.tickets.order_by("ticket_code"))
     if existing_tickets:
-        if len(existing_tickets) != expected_admissions:
+        if len(existing_tickets) != admission_count:
             raise RegistrationConflict(
                 "Existing admission tickets do not match the reserved ticket quantity."
             )
         return existing_tickets
 
     names = [name.strip() for name in attendee_names]
-    if len(names) != expected_admissions or any(not name for name in names):
+    if len(names) != admission_count or any(not name for name in names):
         raise ValidationError(
             {
                 "attendee_names": (
                     f"Enter a name for each of the "
-                    f"{expected_admissions} attendees."
+                    f"{admission_count} attendees."
                 )
             }
         )
@@ -319,10 +324,9 @@ def retry_on_spot_ticket_issuance(*, payment_id, administrator):
         tickets = issue_registration_tickets(
             registration=registration,
             attendee_names=payment.intent.attendee_names,
-            quantity=payment.intent.quantity,
         )
         if len(tickets) != (
-            payment.intent.quantity * registration.ticket_tier.admission_count
+            registration.quantity * registration.ticket_tier.admission_count
         ):
             raise RegistrationConflict(
                 "The issued ticket count does not match the verified order."
@@ -400,8 +404,8 @@ def create_registration_idempotently(
     buyer,
     source,
     created_by=None,
-    attendee_names=None,
     quantity=1,
+    attendee_names=None,
     payment_confirmation=None,
 ):
     from .models import RegistrationIdempotency
@@ -441,8 +445,8 @@ def create_registration_idempotently(
         buyer=buyer,
         source=source,
         created_by=created_by,
-        attendee_names=attendee_names,
         quantity=quantity,
+        attendee_names=attendee_names,
         payment_confirmation=payment_confirmation,
     )
     idempotency.registration = registration
@@ -513,13 +517,18 @@ def create_reserved_registration(
     if not tier.is_available:
         raise RegistrationConflict("The selected ticket offer is unavailable.")
 
+    if quantity < 1:
+        raise RegistrationConflict("Ticket quantity must be at least one.")
+    admission_count = tier.admission_count * quantity
+    if admission_count > event.capacity:
+        raise RegistrationConflict("The requested ticket quantity exceeds event capacity.")
+
     names = [name.strip() for name in attendee_names]
-    admission_quantity = quantity * tier.admission_count
-    if len(names) != admission_quantity or any(not name for name in names):
+    if len(names) != admission_count or any(not name for name in names):
         raise ValidationError(
             {
                 "attendee_names": (
-                    f"Enter a name for each of the {admission_quantity} attendees."
+                    f"Enter a name for each of the {admission_count} attendees."
                 )
             }
         )
@@ -549,7 +558,7 @@ def create_reserved_registration(
     legacy_units = legacy_reservations.aggregate(
         total=Sum(F("ticket_tier__admission_count") * F("quantity"))
     )["total"] or 0
-    if active_count + reserved_units + legacy_units + admission_quantity > event.capacity:
+    if active_count + reserved_units + legacy_units + admission_count > event.capacity:
         raise RegistrationConflict(
             "Not enough event capacity remains for this ticket offer."
         )
@@ -562,13 +571,14 @@ def create_reserved_registration(
         buyer_phone=buyer["phone"],
         buyer_organization=buyer.get("organization", "").strip(),
         buyer_job_title=buyer.get("job_title", "").strip(),
+        quantity=quantity,
         source=Registration.Source.ONLINE,
         status=Registration.Status.REGISTERED,
     )
     InventoryReservation.objects.create(
         registration=registration,
         event=event,
-        units_reserved=admission_quantity,
+        units_reserved=admission_count,
         expires_at=reservation_expiry,
     )
     intent = PaymentIntent.objects.create(
@@ -581,8 +591,8 @@ def create_reserved_registration(
         buyer_phone=registration.buyer_phone,
         buyer_organization=registration.buyer_organization,
         buyer_job_title=registration.buyer_job_title,
-        attendee_names=names,
         quantity=quantity,
+        attendee_names=names,
         status=PaymentIntent.Status.PENDING,
         registration=registration,
         expires_at=reservation_expiry,
