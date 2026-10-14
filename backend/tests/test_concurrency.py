@@ -5,7 +5,6 @@ import math
 import time
 from threading import Barrier
 from unittest import skipUnless
-from unittest.mock import Mock, patch
 import uuid
 
 from django.contrib.auth import get_user_model
@@ -24,13 +23,7 @@ from apps.tickets.models import Ticket
 
 
 @skipUnless(connection.vendor == "postgresql", "Concurrency guarantees require PostgreSQL row locks.")
-@override_settings(
-    PAYU_MERCHANT_KEY="payu-test-key",
-    PAYU_MERCHANT_SALT="payu-test-salt",
-    PAYU_ENVIRONMENT="test",
-    PAYU_FRONTEND_URL="https://tickets.example.test",
-    DJANGO_INTERNAL_API_KEY="n8n-test-token",
-)
+@override_settings(DJANGO_INTERNAL_API_KEY="n8n-test-token")
 class PostgreSQLConcurrencyTests(TransactionTestCase):
     reset_sequences = True
 
@@ -106,32 +99,6 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
             role="ADMIN",
         )
 
-    def _payu_verification_response(self, *args, **kwargs):
-        txnid = kwargs["data"]["var1"]
-        payment = Payment.objects.select_related("intent").get(
-            provider_order_id=txnid
-        )
-        response = Mock()
-        response.raise_for_status.return_value = None
-        response.json.return_value = {
-            "status": 1,
-            "transaction_details": {
-                txnid: {
-                    "txnid": txnid,
-                    "mihpayid": f"payu-{payment.id.hex}",
-                    "amount": f"{payment.amount / 100:.2f}",
-                    "productinfo": "Dhandiya Night Tickets",
-                    "firstname": payment.intent.buyer_name.strip().split(maxsplit=1)[0][:60],
-                    "email": payment.intent.buyer_email,
-                    "udf1": str(payment.intent_id),
-                    "udf2": str(payment.id),
-                    "status": "success",
-                    "unmappedstatus": "captured",
-                }
-            },
-        }
-        return response
-
     def _request_payload(self, name, email, tier=None):
         return {
             "event_id": str(self.event.id),
@@ -169,32 +136,12 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
                     HTTP_IDEMPOTENCY_KEY=spec.get("idempotency_key", ""),
                     REMOTE_ADDR=spec.get("remote_addr", f"198.51.100.{index + 1}"),
                 )
-                order_replayed = None
-                verification_status = None
-                if spec.get("payment_flow") and response.status_code in (200, 201):
-                    order_replayed = response.data["replayed"]
-                    order_id = response.data["order_id"]
-                    verified = client.get(
-                        "/api/v1/payments/status/",
-                        {
-                            "txnid": order_id,
-                            "idempotency_key": response.data["payment_params"]["udf1"],
-                        },
-                    )
-                    verification_status = verified.status_code
-                    if verified.status_code >= 400:
-                        response = verified
-                        response_data = verified.data
-                    else:
-                        response_data = verified.data
-                else:
-                    response_data = response.data
+                replayed = response.data.get("replayed")
                 return {
                     "status": response.status_code,
-                    "data": response_data,
+                    "data": response.data,
                     "headers": dict(response.headers),
-                    "order_replayed": order_replayed,
-                    "verification_status": verification_status,
+                    "replayed": replayed,
                     "latency_ms": (time.perf_counter() - started) * 1000,
                 }
             except Exception as error:
@@ -205,16 +152,12 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
             finally:
                 connections.close_all()
 
-        with patch(
-            "apps.payments.services.requests.post",
-            side_effect=self._payu_verification_response,
-        ):
-            with ThreadPoolExecutor(max_workers=len(specs)) as executor:
-                futures = [
-                    executor.submit(send, index, spec)
-                    for index, spec in enumerate(specs)
-                ]
-                return [future.result() for future in futures]
+        with ThreadPoolExecutor(max_workers=len(specs)) as executor:
+            futures = [
+                executor.submit(send, index, spec)
+                for index, spec in enumerate(specs)
+            ]
+            return [future.result() for future in futures]
 
     def _report_results(self, label, results):
         latencies = sorted(result["latency_ms"] for result in results)
@@ -436,11 +379,10 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
         }
         specs = [
             {
-                "path": "/api/v1/payments/create-order/",
+                "path": "/api/v1/payments/proof/registrations/",
                 "payload": payload,
                 "idempotency_key": key,
                 "remote_addr": f"198.18.0.{index + 1}",
-                "payment_flow": True,
             }
             for index in range(request_count)
         ]
@@ -452,35 +394,16 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
             request_count - 1,
         )
         registration_ids = {
-            result["data"]["registration"]["id"] for result in results
-        }
-        ticket_sets = {
-            tuple(ticket["id"] for ticket in result["data"]["tickets"])
-            for result in results
-        }
-        qr_token_sets = {
-            tuple(ticket["qr_token"] for ticket in result["data"]["tickets"])
-            for result in results
+            result["data"]["registration_id"] for result in results
         }
         self.assertEqual(len(registration_ids), 1)
-        self.assertEqual(len(ticket_sets), 1)
-        self.assertEqual(len(qr_token_sets), 1)
-        self.assertEqual(len(set(next(iter(qr_token_sets)))), 4)
         self.assertEqual(Registration.objects.count(), 1)
-        self.assertEqual(Ticket.objects.count(), 4)
+        self.assertEqual(Ticket.objects.count(), 0)
         self.assertEqual(PaymentIntent.objects.count(), 1)
-        self.assertEqual(Payment.objects.count(), 1)
-        self.assertEqual(
-            Payment.objects.get().verification_status,
-            Payment.VerificationStatus.VERIFIED,
-        )
+        self.assertEqual(Payment.objects.count(), 0)
         self.assertEqual(TicketDelivery.objects.count(), 0)
         self.assertEqual(
-            sum(result["verification_status"] == 200 for result in results),
-            request_count,
-        )
-        self.assertEqual(
-            sum(result["order_replayed"] is True for result in results),
+            sum(result["replayed"] is True for result in results),
             request_count - 1,
         )
         self.assertEqual(
@@ -563,7 +486,7 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
                     "path": (
                         "/api/v1/registrations/on-spot/"
                         if source == "onspot"
-                        else "/api/v1/payments/create-order/"
+                        else "/api/v1/payments/proof/registrations/"
                     ),
                     "payload": payload,
                     "user_id": (
@@ -571,7 +494,6 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
                     ),
                     "idempotency_key": str(uuid.uuid4()),
                     "remote_addr": f"192.0.2.{index + 1}",
-                    "payment_flow": source == "online",
                 }
             )
         return specs
@@ -589,37 +511,42 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
         )
         self.assertEqual(len(registrations), 5)
         self.assertEqual(len({registration.id for registration in registrations}), 5)
+        expected_tickets = 20 if source == "onspot" else 0
         self.assertEqual(
             Ticket.objects.filter(registration__in=registrations).count(),
-            20,
+            expected_tickets,
         )
         if source == "onspot":
             self.assertEqual(RegistrationIdempotency.objects.count(), 5)
         else:
+            self.assertEqual(RegistrationIdempotency.objects.count(), 5)
             self.assertEqual(PaymentIntent.objects.count(), 5)
-            self.assertEqual(Payment.objects.count(), 5)
-            self.assertTrue(
-                all(result["verification_status"] == 200 for result in results)
-            )
+            self.assertEqual(Payment.objects.count(), 0)
         for spec, result in zip(specs, results):
-            response_registration = result["data"]["registration"]
-            registration = Registration.objects.get(pk=response_registration["id"])
+            registration_id = (
+                result["data"]["registration"]["id"]
+                if source == "onspot"
+                else result["data"]["registration_id"]
+            )
+            registration = Registration.objects.get(pk=registration_id)
             self.assertEqual(registration.source, registration_source)
             self.assertEqual(registration.event_id, self.event.id)
             self.assertEqual(registration.ticket_tier_id, self.combo.id)
-            self.assertEqual(
-                sorted(
-                    registration.tickets.order_by("created_at").values_list(
-                        "attendee_name",
-                        flat=True,
-                    )
-                ),
-                sorted(spec["payload"]["attendee_names"]),
-            )
-            for response_ticket in result["data"]["tickets"]:
-                stored_ticket = Ticket.objects.get(pk=response_ticket["id"])
-                self.assertEqual(stored_ticket.registration_id, registration.id)
-                self.assertEqual(stored_ticket.token, response_ticket["qr_token"])
+            if source == "onspot":
+                self.assertEqual(
+                    sorted(
+                        registration.tickets.order_by("created_at").values_list(
+                            "attendee_name",
+                            flat=True,
+                        )
+                    ),
+                    sorted(spec["payload"]["attendee_names"]),
+                )
+            else:
+                self.assertEqual(
+                    registration.payment_intent.attendee_names,
+                    spec["payload"]["attendee_names"],
+                )
 
 
     def test_five_online_registrations_concurrently(self):
@@ -686,19 +613,19 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
             )
             self.assertEqual(
                 Ticket.objects.filter(registration__event=self.event).count(),
-                46 * (repetition + 1),
+                6 * (repetition + 1),
             )
             self.assertEqual(
                 RegistrationIdempotency.objects.count(),
-                5 * (repetition + 1),
+                10 * (repetition + 1),
             )
             self.assertEqual(
                 PaymentIntent.objects.count(),
-                5 * (repetition + 1),
+                10 * (repetition + 1),
             )
             self.assertEqual(
                 Payment.objects.count(),
-                5 * (repetition + 1),
+                0,
             )
             from apps.scanning.models import TicketScan
 
@@ -716,54 +643,37 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
             name = f"Capacity Attendee {self._tag(index)}"
             specs.append(
                 {
-                    "path": "/api/v1/payments/create-order/",
+                    "path": "/api/v1/payments/proof/registrations/",
                     "payload": self._request_payload(
                         name,
                         f"capacity-{index}@example.test",
                     ),
                     "idempotency_key": str(uuid.uuid4()),
                     "remote_addr": f"198.51.100.{index + 1}",
-                    "payment_flow": True,
                 }
             )
         results = self._concurrent_requests(specs)
         self._report_results("capacity_race_5_for_2", results)
         self.assertEqual(sum(result.get("status") == 201 for result in results), 2)
         self.assertEqual(sum(result.get("status") == 409 for result in results), 3)
-        self.assertEqual(
-            Ticket.objects.exclude(status=Ticket.Status.CANCELLED).count(),
-            2,
-        )
+        self.assertEqual(Ticket.objects.count(), 0)
         self.assertEqual(Registration.objects.count(), 2)
-        self.assertEqual(RegistrationIdempotency.objects.count(), 0)
+        self.assertEqual(RegistrationIdempotency.objects.count(), 2)
         self.assertEqual(PaymentIntent.objects.count(), 2)
-        self.assertEqual(Payment.objects.count(), 2)
+        self.assertEqual(Payment.objects.count(), 0)
         self._assert_database_and_dashboard_consistent()
 
-    def _create_and_verify_online(self, payload, key, remote_addr):
+    def _create_manual_reservation(self, payload, key, remote_addr):
         client = APIClient()
-        with patch(
-            "apps.payments.services.requests.post",
-            side_effect=self._payu_verification_response,
-        ):
-            order = client.post(
-                "/api/v1/payments/create-order/",
-                payload,
-                format="json",
-                HTTP_IDEMPOTENCY_KEY=key,
-                REMOTE_ADDR=remote_addr,
-            )
-            self.assertEqual(order.status_code, 201, order.data)
-            order_id = order.data["order_id"]
-            verification = client.get(
-                "/api/v1/payments/status/",
-                {
-                    "txnid": order_id,
-                    "idempotency_key": order.data["payment_params"]["udf1"],
-                },
-            )
-        self.assertEqual(verification.status_code, 200, verification.data)
-        return order, verification
+        reservation = client.post(
+            "/api/v1/payments/proof/registrations/",
+            payload,
+            format="json",
+            HTTP_IDEMPOTENCY_KEY=key,
+            REMOTE_ADDR=remote_addr,
+        )
+        self.assertEqual(reservation.status_code, 201, reservation.data)
+        return reservation
 
     def _mixed_load_specs(self, operation_count):
         scan_count = operation_count // 3
@@ -794,11 +704,10 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
             name = f"Load Online {self._tag(index)}"
             specs.append(
                 {
-                    "path": "/api/v1/payments/create-order/",
+                    "path": "/api/v1/payments/proof/registrations/",
                     "payload": self._request_payload(name, f"load-onl-{operation_count}-{index}@example.test"),
                     "idempotency_key": str(uuid.uuid4()),
                     "remote_addr": f"172.18.{operation_count}.{index + 1}",
-                    "payment_flow": True,
                 }
             )
         for index in range(duplicate_count):
@@ -808,18 +717,17 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
                 f"load-dup-{operation_count}-{index}@example.test",
             )
             key = str(uuid.uuid4())
-            self._create_and_verify_online(
+            self._create_manual_reservation(
                 payload,
                 key,
                 f"172.19.{operation_count}.{index + 1}",
             )
             specs.append(
                 {
-                    "path": "/api/v1/payments/create-order/",
+                    "path": "/api/v1/payments/proof/registrations/",
                     "payload": payload,
                     "idempotency_key": key,
                     "remote_addr": f"172.20.{operation_count}.{index + 1}",
-                    "payment_flow": True,
                 }
             )
         return specs, scan_count
@@ -845,7 +753,7 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
             )
         )
         self.assertEqual(
-            sum(result.get("order_replayed") is True for result in results),
+            sum(result.get("replayed") is True for result in results),
             operation_count - scan_count - operation_count // 3,
         )
         self.assertEqual(
@@ -854,10 +762,11 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
         )
         self.assertEqual(
             Ticket.objects.filter(registration__event=self.event).count(),
-            operation_count,
+            scan_count,
         )
         self.assertEqual(
-            RegistrationIdempotency.objects.count(), 0
+            RegistrationIdempotency.objects.count(),
+            operation_count - scan_count,
         )
         self.assertEqual(
             PaymentIntent.objects.count(),
@@ -865,7 +774,7 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
         )
         self.assertEqual(
             Payment.objects.count(),
-            PaymentIntent.objects.count(),
+            0,
         )
         from apps.scanning.models import TicketScan
 

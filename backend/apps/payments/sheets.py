@@ -15,11 +15,16 @@ SHEET_HEADERS = (
     "ticket_number",
     "registration_id",
     "ticket_type",
+    "booking_quantity",
+    "ticket_quantity",
+    "unit_price",
     "name",
     "email",
     "phone",
     "amount_due",
     "payment_method",
+    "provider_order_id",
+    "provider_payment_id",
     "upi_id",
     "transaction_id_utr",
     "payment_status",
@@ -213,7 +218,7 @@ def sheet_sync_data(sync):
         if payment.verified_by
         else "Payment gateway"
     )
-    amount_due = f"{payment.amount / 100:.2f}"
+    amount_due = f"{payment.amount // 100}.{payment.amount % 100:02d}"
     return {
         "job_id": str(sync.id),
         "attempt": sync.attempt_count,
@@ -224,11 +229,16 @@ def sheet_sync_data(sync):
             "ticket_number": ticket.ticket_code,
             "registration_id": str(registration.id),
             "ticket_type": registration.ticket_tier.name,
+            "booking_quantity": registration.quantity,
+            "ticket_quantity": registration.tickets.count(),
+            "unit_price": f"{registration.ticket_tier.price:.2f}",
             "name": ticket.attendee_name or registration.buyer_name,
             "email": registration.buyer_email,
             "phone": registration.buyer_phone,
             "amount_due": amount_due,
             "payment_method": payment.payment_method or payment.provider,
+            "provider_order_id": payment.provider_order_id or "",
+            "provider_payment_id": payment.provider_payment_id or "",
             "upi_id": "",
             "transaction_id_utr": payment.utr_reference or payment.transaction_id,
             "payment_status": payment.status,
@@ -272,7 +282,11 @@ def sheet_sync_lease_expiry(now=None):
 def backfill_ticket_sheet_syncs(batch_size=500):
     ticket_count = 0
     tickets = Ticket.objects.filter(
-        status=Ticket.Status.ISSUED,
+        status__in=(
+            Ticket.Status.ISSUED,
+            Ticket.Status.USED,
+            Ticket.Status.CANCELLED,
+        ),
         registration__status=Registration.Status.TICKET_ISSUED,
     ).select_related("registration__event").order_by("id")
     for ticket in tickets.iterator(chunk_size=batch_size):

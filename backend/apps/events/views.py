@@ -28,7 +28,7 @@ def public_events_queryset():
         .annotate(total=Sum("units_reserved"))
         .values("total")[:1]
     )
-    active_payu_reserved_units = (
+    active_legacy_payment_reserved_units = (
         PaymentIntent.objects.filter(
             event_id=OuterRef("pk"),
             registration__isnull=True,
@@ -60,8 +60,8 @@ def public_events_queryset():
                 Subquery(active_reserved_units),
                 Value(0),
             ),
-            active_payu_reserved_units=Coalesce(
-                Subquery(active_payu_reserved_units),
+            active_legacy_payment_reserved_units=Coalesce(
+                Subquery(active_legacy_payment_reserved_units),
                 Value(0),
             ),
         )

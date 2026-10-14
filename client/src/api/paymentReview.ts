@@ -80,10 +80,6 @@ export interface PaymentReviewDashboard {
 export const paymentReviewApi = {
   getDashboard: () =>
     apiRequest<PaymentReviewDashboard>('/payments/review/dashboard/'),
-  reconcile: (paymentId: string) =>
-    apiRequest<unknown>(`/payments/review/${encodeURIComponent(paymentId)}/reconcile/`, {
-      method: 'POST',
-    }),
   getProofDashboard: () =>
     apiRequest<{ proofs: ManualPaymentProof[] }>('/payments/proof/dashboard/'),
   getProofScreenshot: (screenshotUrl: string) => apiBlob(screenshotUrl),

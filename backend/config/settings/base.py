@@ -199,13 +199,6 @@ CORS_ALLOW_HEADERS = (
 )
 CORS_ALLOW_CREDENTIALS = True
 
-PAYU_MERCHANT_KEY = os.environ.get("PAYU_MERCHANT_KEY", "")
-PAYU_MERCHANT_SALT = os.environ.get("PAYU_MERCHANT_SALT", "")
-PAYU_ENVIRONMENT = os.environ.get("PAYU_ENVIRONMENT", "test").lower()
-PAYU_SUCCESS_URL = os.environ.get("PAYU_SUCCESS_URL", "")
-PAYU_FAILURE_URL = os.environ.get("PAYU_FAILURE_URL", "")
-PAYU_WEBHOOK_URL = os.environ.get("PAYU_WEBHOOK_URL", "")
-PAYU_FRONTEND_URL = os.environ.get("PAYU_FRONTEND_URL", "")
 PAYMENT_PROOF_RESERVATION_HOURS = positive_integer_setting(
     "PAYMENT_PROOF_RESERVATION_HOURS",
     24,

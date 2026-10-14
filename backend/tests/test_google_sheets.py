@@ -1,5 +1,6 @@
 from unittest.mock import patch
 
+import requests
 from django.test import SimpleTestCase
 
 from apps.payments.google_sheets import (
@@ -51,10 +52,58 @@ class GoogleSheetsClientTests(SimpleTestCase):
         self.assertEqual(result, "UPDATED")
         write_values.assert_called_once_with(
             "Online_Tickets",
-            "A2:X2",
+            "A2:AC2",
             [[row[header] for header in SHEET_HEADERS]],
         )
         append_values.assert_not_called()
+
+    def test_retry_after_append_timeout_updates_instead_of_duplicating(self):
+        row = {header: "" for header in SHEET_HEADERS}
+        row.update(ticket_id="stable-ticket-id", ticket_number="SIMS-DN-20260001")
+        rows = [list(SHEET_HEADERS)]
+
+        def append_then_timeout(_title, values):
+            rows.append(values)
+            raise requests.Timeout("simulated lost response after append")
+
+        with (
+            patch.object(self.client, "_ensure_headers", side_effect=lambda _title: rows),
+            patch.object(
+                self.client,
+                "_append_values",
+                side_effect=append_then_timeout,
+            ) as append_values,
+            patch.object(self.client, "_write_values") as write_values,
+        ):
+            with self.assertRaises(requests.Timeout):
+                self.client.upsert_ticket_row("Online_Tickets", row)
+
+            result = self.client.upsert_ticket_row("Online_Tickets", row)
+
+        self.assertEqual(result, "UPDATED")
+        append_values.assert_called_once()
+        write_values.assert_called_once_with(
+            "Online_Tickets",
+            "A2:AC2",
+            [[row[header] for header in SHEET_HEADERS]],
+        )
+        self.assertEqual(len(rows), 2)
+
+    def test_append_range_tracks_schema_width(self):
+        with patch.object(self.client, "_request") as request:
+            self.client._append_values("Online_Tickets", ["value"])
+
+        self.assertEqual(
+            request.call_args.args[1],
+            "/values/'Online_Tickets'!A:AC:append",
+        )
+
+    def test_column_name_supports_multi_letter_columns(self):
+        self.assertEqual(self.client._column_name(24), "X")
+        self.assertEqual(self.client._column_name(27), "AA")
+        self.assertEqual(self.client._column_name(29), "AC")
+        self.assertEqual(self.client._column_name(52), "AZ")
+        self.assertEqual(self.client._column_name(53), "BA")
 
     def test_existing_legacy_records_are_archived_and_mapped_before_migration(self):
         old_rows = [
@@ -90,6 +139,9 @@ class GoogleSheetsClientTests(SimpleTestCase):
         self.assertEqual(migrated[1][SHEET_HEADERS.index("payment_status")], "VERIFIED")
         self.assertEqual(migrated[1][SHEET_HEADERS.index("email_status")], "SENT")
         self.assertEqual(migrated[1][SHEET_HEADERS.index("name")], "")
+        self.assertEqual(migrated[1][SHEET_HEADERS.index("booking_quantity")], "")
+        self.assertEqual(migrated[1][SHEET_HEADERS.index("ticket_quantity")], "")
+        self.assertEqual(migrated[1][SHEET_HEADERS.index("unit_price")], "")
         clear_values.assert_called_once_with("Online_Tickets")
         self.assertEqual(write_values.call_count, 2)
         self.assertEqual(write_values.call_args_list[0].args[2], old_rows)

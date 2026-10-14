@@ -71,8 +71,8 @@ never expose it in the frontend.
 Create a Neon PostgreSQL database and set `DATABASE_URL` on the Render web
 service to its TLS-enabled direct connection string. Keep the connection
 string in Render's environment, not in source control. Render's worker reuses
-that setting from the web service. Use separate Neon databases/branches and PayU test credentials for staging and
-production.
+that setting from the web service. Use separate Neon databases/branches for
+staging and production.
 
 Deploy `client/` as the Vercel project root. Set the build-time
 `VITE_API_BASE_URL` to `https://<render-service-host>/api/v1`; it is a public
@@ -108,37 +108,41 @@ with the longest expected sync pass.
 The worker creates missing `Online_Tickets` and `OnSpot_Tickets` worksheets
 and their exact row-1 schema:
 
-`ticket_id`, `ticket_number`, `registration_id`, `ticket_type`, `name`,
-`email`, `phone`, `amount_due`, `payment_method`, `upi_id`,
+`ticket_id`, `ticket_number`, `registration_id`, `ticket_type`,
+`booking_quantity`, `ticket_quantity`, `unit_price`, `name`, `email`, `phone`,
+`amount_due`, `payment_method`, `provider_order_id`, `provider_payment_id`,
+`upi_id`,
 `transaction_id_utr`, `payment_status`, `verified_by`, `verified_at`,
 `ticket_status`, `ticket_generated_at`, `email_status`, `email_sent_at`,
 `scan_status`, `checked_in_at`, `checked_in_by`, `created_at`, `updated_at`,
 `last_synced_at`.
 
-Only issued tickets with a saved QR token and a verified payment are eligible.
-Rows are upserted by the stable ticket UUID in `ticket_id`; QR tokens and
-payment screenshots are never exported. An existing nonmatching worksheet
-schema is copied to a `Legacy_*` worksheet before its known columns are mapped
-to the required schema; original rows remain in that archive. Unknown or
-duplicate ticket IDs or duplicate column headers stop migration without
-clearing the source sheet, and surface as failed syncs rather than being
-silently discarded. Empty worksheets receive the headers automatically.
+Each row represents one ticket. `booking_quantity` is the number of selected
+ticket-tier units, `ticket_quantity` is the number of individual tickets
+generated for the booking, `unit_price` is the price of one selected tier unit,
+and `amount_due` is the total verified booking amount in INR. Booking-level
+values repeat on each ticket row; aggregate booking totals by `registration_id`
+to avoid counting a multi-ticket booking more than once. Only tickets linked to
+a verified payment and saved QR token are eligible. Rows are upserted by the
+stable ticket UUID in `ticket_id`; QR tokens and payment screenshots are never
+exported. An existing nonmatching worksheet schema is copied to a `Legacy_*`
+worksheet before its known columns are mapped to the required schema; original
+rows remain in that archive. Unknown or duplicate ticket IDs or duplicate
+column headers stop migration without clearing the source sheet, and surface
+as failed syncs rather than being silently discarded. Empty worksheets receive
+the headers automatically.
 
 Cancellation and successful check-in changes requeue the same durable
 outbox record. Google API failures retry with bounded exponential backoff and
 become terminal after five attempts. Administrators can view and retry failed
 records from Django admin under Payments → Ticket sheet sync. A failed Sheets
 sync does not roll back registration, payment verification, ticket issuance,
-or check-in. Run `python manage.py backfill_ticket_sheet_syncs` to reconcile
-all currently eligible database tickets; its stable-ID upserts restore missing
-rows and overwrite outdated values without adding duplicates. the legacy n8n Sheets polling workflow should be disabled when the Render
-worker is enabled.
-
-Configure the PayU merchant key and salt as backend-only secrets; use
-`PAYU_ENVIRONMENT=test` for staging and register the callback/webhook URLs with
-PayU. Production mode must use separate production credentials after merchant
-activation and sandbox validation. `PAYU_FRONTEND_URL` is the browser return
-origin.
+or check-in. The backfill includes issued, checked-in, and cancelled tickets
+with verified payments. Run `python manage.py backfill_ticket_sheet_syncs`
+after deploying a sheet-column change to refresh existing rows; its stable-ID
+upserts restore missing rows and overwrite outdated values without adding
+duplicates. The legacy n8n Sheets polling workflow should be disabled when the
+Render worker is enabled.
 
 Payment screenshots are uploaded by the backend using the official Cloudinary
 SDK. Set `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and
@@ -184,14 +188,12 @@ the administrator ticket tools; each ticket has an independent yearly
 sequence and a unique QR token. Existing online and on-spot registrations
 remain separate and are not converted into college tickets.
 
-Schedule `python manage.py reconcile_payu_payments` on the backend every
-minute or every few minutes to retry due PayU verifications. Each run is a
-bounded pass; automatic verification uses at most five attempts per payment
-with exponential backoff and honors a PayU `Retry-After` header. Captured
-payments needing review are not automatically ticketed. An administrator can
-retry verification or resume verified ticket issuance from the Payment Review
-page. Do not rerun a checkout or charge the customer again to reconcile a
-pending transaction.
+Manual UPI is the only active online payment flow. Before deploying removal of
+the retired gateway code, disable its callbacks/webhooks and any externally
+configured reconciliation job, then remove its obsolete environment variables
+from Render. Historical provider transaction IDs and verification attempts
+remain available in the database and payment review dashboard; the application
+does not retry those gateway transactions.
 
 Never commit `.env` files. The root `.env.example` contains names and
 non-secret development defaults only.

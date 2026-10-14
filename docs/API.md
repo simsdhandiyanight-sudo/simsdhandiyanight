@@ -294,7 +294,7 @@ GET /api/v1/events/
 Create a resource or perform an operation that creates a server-side result.
 
 ```http
-POST /api/v1/payments/create-order/
+POST /api/v1/payments/proof/registrations/
 ```
 
 ```http
@@ -375,12 +375,11 @@ admission suffixes and retain separate QR tokens.
 
 # 14. Online Payment and Registration
 
-Public online tickets are issued only after the backend validates PayU's reverse response hash and confirms the captured transaction with PayU's Verify Payment API.
-
-Create or replay an order with a UUID idempotency key:
+Online registrations use manual UPI payment and administrator verification.
+Create or replay a registration reservation with a UUID idempotency key:
 
 ```http
-POST /api/v1/payments/create-order/
+POST /api/v1/payments/proof/registrations/
 Content-Type: application/json
 Idempotency-Key: 85635d34-bcbf-4a6d-b15e-0019e16bba80
 ```
@@ -400,36 +399,46 @@ Example:
 }
 ```
 
-For the six-admission combo, `attendee_names` must contain six valid names. The backend derives price, currency, event, and admission count from the selected ticket offer; a client cannot supply payment success or ticket status.
+For a six-admission offer, `attendee_names` must contain six valid names.
+The backend derives the event, price, currency, and admission count from the
+selected ticket offer; the client cannot submit payment success or ticket
+status. A new reservation returns `201 Created`; a retry with the same key and
+normalized request reuses the reservation and returns `200 OK`. Reusing the key
+with different registration details returns `409 Conflict`. The response
+includes the registration ID, a proof-access token, and the amount to pay.
 
-The first response is `201 Created`; a retry with the same key and normalized request reuses the existing payment intent/transaction and returns `200 OK`. Reusing the key with a different request returns `409 Conflict`. The backend response contains `checkout_url` and the signed `payment_params` for the frontend to submit as an `application/x-www-form-urlencoded` POST to PayU. The merchant salt is never returned.
+The customer pays the displayed amount using the existing UPI QR instructions.
+The secure proof page reads reservation/payment state through
+`GET /api/v1/payments/proof/registrations/{registration_id}/` with the
+`X-Proof-Access-Token` header. Submit payment details with
+`POST /api/v1/payments/proof/registrations/{registration_id}/submit/` as
+multipart form data: `utr_reference`, `transaction_id`, and `screenshot`.
+Both references are validated and deduplicated against manual UPI submissions.
+Submitting proof leaves the payment pending verification and does not issue
+admission tickets.
 
-PayU posts its signed success and failure responses to the configured callback URLs. Those callbacks and the configured PayU webhook share server-side processing. The callback hash is checked, then the backend calls PayU's Verify Payment API using its server-side credential:
+Administrators with the `IsAdministrator` permission can view submitted proofs
+through `GET /api/v1/payments/proof/dashboard/`, retrieve a screenshot through
+the protected screenshot route, and approve or reject using the corresponding
+`/payments/proof/{payment_id}/approve/` and `/reject/` routes. Approval requires
+explicit confirmation that the amount and transaction were received in bank or
+UPI records. Only approval verifies the manual payment and issues the reserved
+number of individual tickets, each with its own QR credential. Rejection does
+not mark a payment as paid; the existing correction window governs resubmission.
+The customer proof-access token can be used to download the ticket-ID
+confirmation and, after approval, the issued tickets PDF.
 
-```http
-POST /api/v1/payments/payu/success/
-Content-Type: application/x-www-form-urlencoded
-```
-
-The failure callback is `POST /api/v1/payments/payu/failure/`; PayU webhook notifications are accepted at `POST /api/v1/payments/payu/webhook/`. Configure the exact webhook URL in the PayU merchant dashboard. The frontend return page is set using `PAYU_FRONTEND_URL`.
-
-The browser return page can check transaction status with:
-
-```http
-GET /api/v1/payments/status/?txnid=<merchant_transaction_id>&idempotency_key=<booking_uuid>
-```
-
-The idempotency key must be the UUID originally sent in `Idempotency-Key`; it prevents an exposed transaction reference alone from granting access to tickets. The status endpoint also reconciles directly with PayU and never trusts browser-supplied payment status. It returns tickets only after the merchant transaction ID, amount, booking details, PayU response hash, and PayU's captured transaction status are verified. Duplicate callbacks are idempotent. If PayU confirms capture but ticket issuance fails, the payment remains recorded and the case requires administrator review; tickets are not issued a second time. Administrators can inspect cases through `GET /api/v1/payments/review/dashboard/`.
-
-This implementation follows PayU's [Hosted Checkout](https://docs.payu.in/docs/cb-integration-non-seamless) request/reverse-hash format and the documented Verify Payment API (`verify_payment` command at `https://test.payu.in/merchant/postservice.php?form=2` in test mode and `https://info.payu.in/merchant/postservice.php?form=2` in production).
-
-Set backend-only `PAYU_MERCHANT_KEY` and `PAYU_MERCHANT_SALT`, plus `PAYU_ENVIRONMENT=test` during sandbox integration. Production uses `PAYU_ENVIRONMENT=production`; test and production merchant credentials must remain separate. `PAYU_SUCCESS_URL` and `PAYU_FAILURE_URL` should point to the backend callback URLs. `PAYU_WEBHOOK_URL` is the corresponding public webhook endpoint for dashboard configuration.
+Administrators can also inspect incomplete or inconsistent payment/ticket
+records through `GET /api/v1/payments/review/dashboard/`. Historical provider
+transaction IDs and verification attempts remain stored for auditability, but
+the retired hosted-checkout, callback, webhook, status, and reconciliation
+endpoints are no longer available.
 
 Direct public `POST /api/v1/registrations/` returns `402 PAYMENT_REQUIRED`; it cannot issue tickets. New on-spot registration is disabled. Existing on-spot records remain available to authorized staff and administrators for lookup, scanning, reporting, and ticket validity.
 
 The Dhandiya Night canonical event UUID is `8b3f7a20-6e8d-4b91-a462-9c5d2f1e7043`, with slug `dhandiya-night-2026`. The public landing page uses hardcoded descriptive content; event detail and ticket availability are loaded from the backend API. Render seeds the canonical event and ticket tiers at startup. Do not use the frontend demo ID `evt-technova-2026` as the production event primary key.
 
-Configured offer prices are ₹149 for one admission and ₹745 for six combo admissions. PayU payment requests include the existing fixed ₹4 per-admission charge (₹153 single; ₹769 combo); this charge is not shown on the registration page and is not a percentage-based tax calculation. Refunds and settlement reversals are not supported in this application. Sandbox integration must be validated with the merchant account before enabling production mode.
+Configured offer prices are ₹149 for one admission and ₹745 for six combo admissions; manual UPI uses the configured offer price. Refunds and settlement reversals are not supported in this application.
 
 ---
 

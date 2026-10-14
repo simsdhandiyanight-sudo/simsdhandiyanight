@@ -153,8 +153,8 @@ One registration represents one buyer/order and may contain one or more admissio
 
 The Dhandiya Night offers currently configured in the product UI are:
 
-- Single Ticket: one admission for ₹149, with an additional ₹4 per-admission charge collected through PayU (₹153 charged).
-- Combo Offer: five paid admissions plus one included admission, for six independently scannable tickets at ₹745, with an additional ₹4 per admission collected through PayU (₹769 charged).
+- Single Ticket: one admission for ₹149, paid by manual UPI using the displayed QR code.
+- Combo Offer: five paid admissions plus one included admission, for six independently scannable tickets at ₹745, paid by manual UPI using the displayed QR code.
 
 Event capacity is consumed per admission/ticket, so a combo consumes six places. The buyer/contact may be shared by the order. A combo registration requires all six attendee names: the buyer's name is the first attendee name, and five additional attendee names are required. Buyer email and phone are collected once and shared across the order. Each generated ticket carries its own attendee name.
 
@@ -181,9 +181,9 @@ ISSUED -> CANCELLED  through authorized cancellation
 
 # 9. Payment and Tax
 
-The registration page displays ticket offer prices in INR: ₹149 for one admission and ₹745 for the six-admission combo. PayU collects an additional fixed ₹4 per admission, included in the order total (₹153 single; ₹769 combo) and not shown on the registration page. The application uses PayU hosted checkout with persisted idempotency, response-hash validation, and server-side payment verification. Online tickets are issued only after PayU confirms a captured payment matching the stored transaction and booking details. Payment/order state, registration state, and each ticket's admission state are distinct.
+The registration page displays ticket offer prices in INR: ₹149 for one admission and ₹745 for the six-admission combo. Customers pay manually using the existing UPI QR and submit the UTR, transaction ID, and payment proof. An authorized administrator confirms receipt against bank/UPI records before approving the payment; only approval issues individual tickets. Pending or rejected submissions do not issue tickets. Payment state, registration state, and each ticket's admission state are distinct.
 
-Production PayU processing requires activated organization merchant credentials and production configuration. Tax applicability and calculation remain undefined. Sandbox validation is not production-readiness evidence.
+Tax applicability and calculation remain undefined. Historical gateway payment records are retained for auditability; they are not an active checkout flow.
 
 ---
 
@@ -197,7 +197,7 @@ The canonical production Dhandiya Night 2026 event identity is UUID `8b3f7a20-6e
 
 # 11. Unresolved Product Decisions
 
-- Live payment configuration, trusted webhook policy, and settlement behavior. Refunds and settlement reversals are not supported by the application.
+- Tax applicability and calculation for single and combo offers.
 - Whether an event-level payment-required setting is needed for future events.
 - Tax applicability and calculation for single and combo offers.
 - Whole-order cancellation and combo cancellation rules, particularly if any ticket has already been used.

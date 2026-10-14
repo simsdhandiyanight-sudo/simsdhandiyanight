@@ -1,13 +1,16 @@
 import uuid
 from datetime import timedelta
+from io import StringIO
+from unittest.mock import Mock, patch
 
+import requests
 from django.contrib.auth import get_user_model
+from django.core.management import call_command
 from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.events.models import Event, TicketTier
-from apps.payments.sheets import ensure_ticket_sheet_syncs
 from apps.payments.models import Payment, PaymentIntent, TicketDelivery, TicketSheetSync
 from apps.payments.sheets import (
     SHEET_HEADERS,
@@ -59,7 +62,11 @@ class TicketSheetSyncTests(TestCase):
         self.gate = Gate.objects.create(event=self.event, name="Sheet Sync Gate")
         StaffAssignment.objects.create(user=self.admin, gate=self.gate)
 
-    def make_registration(self, *, source, email, number):
+    def make_registration(self, *, source, email, number, quantity=1):
+        attendee_names = [
+            f"Sheet Attendee {number} {index + 1}"
+            for index in range(quantity)
+        ]
         registration, tickets = create_registration(
             event_id=self.event.id,
             tier_id=self.tier.id,
@@ -70,7 +77,8 @@ class TicketSheetSyncTests(TestCase):
             },
             source=source,
             created_by=self.admin if source == Registration.Source.ON_SPOT else None,
-            attendee_names=[f"Sheet Attendee {number}"],
+            quantity=quantity,
+            attendee_names=attendee_names,
             payment_confirmation=(
                 {"payment_received": True, "payment_method": "CASH"}
                 if source == Registration.Source.ON_SPOT
@@ -79,11 +87,20 @@ class TicketSheetSyncTests(TestCase):
         )
         return registration, tickets
 
-    def make_paid_online_ticket(self):
+    def make_paid_online_ticket(
+        self,
+        *,
+        number=1,
+        quantity=1,
+        provider=Payment.Provider.UPI_MANUAL,
+        provider_order_id=None,
+        provider_payment_id=None,
+    ):
         registration, tickets = self.make_registration(
             source=Registration.Source.ONLINE,
-            email="online-sheet@example.test",
-            number=1,
+            email=f"online-sheet-{number}@example.test",
+            number=number,
+            quantity=quantity,
         )
         intent = PaymentIntent.objects.create(
             idempotency_key=uuid.uuid4(),
@@ -93,16 +110,23 @@ class TicketSheetSyncTests(TestCase):
             buyer_name=registration.buyer_name,
             buyer_email=registration.buyer_email,
             buyer_phone=registration.buyer_phone,
-            attendee_names=[tickets[0].attendee_name],
+            attendee_names=[ticket.attendee_name for ticket in tickets],
+            quantity=quantity,
             status=PaymentIntent.Status.VERIFIED,
             registration=registration,
         )
         Payment.objects.create(
             intent=intent,
-            provider=Payment.Provider.UPI_MANUAL,
-            amount=14900,
+            provider=provider,
+            provider_order_id=provider_order_id,
+            provider_payment_id=provider_payment_id,
+            amount=int(registration.ticket_tier.price * quantity * 100),
             currency="INR",
-            status=Payment.Status.VERIFIED,
+            status=(
+                Payment.Status.CAPTURED
+                if provider == Payment.Provider.PAYU
+                else Payment.Status.VERIFIED
+            ),
             verification_status=Payment.VerificationStatus.VERIFIED,
             ticket_issuance_status=Payment.TicketIssuanceStatus.ISSUED,
             verified_at=timezone.now(),
@@ -155,6 +179,10 @@ class TicketSheetSyncTests(TestCase):
             self.assertEqual(data.data["headers"], list(SHEET_HEADERS))
             self.assertEqual(list(data.data["row"]), list(SHEET_HEADERS))
             self.assertEqual(data.data["row"]["payment_status"], "VERIFIED")
+            self.assertEqual(data.data["row"]["booking_quantity"], 1)
+            self.assertEqual(data.data["row"]["ticket_quantity"], 1)
+            self.assertEqual(data.data["row"]["unit_price"], "149.00")
+            self.assertEqual(data.data["row"]["amount_due"], "149.00")
             self.assertTrue(data.data["row"]["verified_by"])
             self.assertTrue(data.data["row"]["verified_at"])
             self.assertTrue(data.data["row"]["last_synced_at"])
@@ -183,6 +211,31 @@ class TicketSheetSyncTests(TestCase):
             2,
         )
 
+    def test_multi_ticket_booking_data_has_correct_quantity_price_and_total(self):
+        ticket = self.make_paid_online_ticket(number=20, quantity=3)
+        registration = ticket.registration
+        self.assertEqual(registration.quantity, 3)
+
+        sync_data = sheet_sync_data(TicketSheetSync.objects.get(ticket=ticket))
+
+        self.assertEqual(sync_data["row"]["booking_quantity"], 3)
+        self.assertEqual(sync_data["row"]["ticket_quantity"], 3)
+        self.assertEqual(sync_data["row"]["unit_price"], "149.00")
+        self.assertEqual(sync_data["row"]["amount_due"], "447.00")
+
+    def test_legacy_provider_order_and_payment_references_are_synchronized(self):
+        ticket = self.make_paid_online_ticket(
+            number=21,
+            provider=Payment.Provider.PAYU,
+            provider_order_id="payu-order-21",
+            provider_payment_id="payu-payment-21",
+        )
+
+        sync_data = sheet_sync_data(TicketSheetSync.objects.get(ticket=ticket))
+
+        self.assertEqual(sync_data["row"]["provider_order_id"], "payu-order-21")
+        self.assertEqual(sync_data["row"]["provider_payment_id"], "payu-payment-21")
+
     def test_unverified_online_tickets_do_not_queue_sheet_jobs(self):
         registration, tickets = self.make_registration(
             source=Registration.Source.ONLINE,
@@ -196,7 +249,7 @@ class TicketSheetSyncTests(TestCase):
         self.assertFalse(TicketSheetSync.objects.exists())
         self.assertFalse(TicketDelivery.objects.exists())
 
-    def test_verified_payu_ticket_queues_without_human_verifier(self):
+    def test_legacy_gateway_ticket_queues_without_human_verifier(self):
         registration, tickets = self.make_registration(
             source=Registration.Source.ONLINE,
             email="payu-sheet@example.test",
@@ -359,6 +412,50 @@ class TicketSheetSyncTests(TestCase):
         )
         self.assertEqual(retried.data["jobs"][0]["attempt"], 2)
 
+    def test_worker_retries_temporary_google_sheets_timeout(self):
+        ticket = self.make_paid_online_ticket(number=25)
+        sync = TicketSheetSync.objects.get(ticket=ticket)
+        sheets_client = Mock()
+        sheets_client.upsert_ticket_row.side_effect = requests.Timeout(
+            "simulated response timeout"
+        )
+
+        with patch(
+            "apps.payments.management.commands.process_ticket_sheet_syncs.create_google_sheets_client",
+            return_value=sheets_client,
+        ):
+            call_command(
+                "process_ticket_sheet_syncs",
+                "--limit",
+                "50",
+                stdout=StringIO(),
+            )
+
+        sync.refresh_from_db()
+        self.assertEqual(sync.status, TicketSheetSync.Status.PENDING)
+        self.assertEqual(sync.attempt_count, 1)
+        self.assertGreater(sync.retry_after, timezone.now())
+
+        sync.retry_after = timezone.now() - timedelta(seconds=1)
+        sync.save(update_fields=("retry_after",))
+        sheets_client.upsert_ticket_row.side_effect = None
+
+        with patch(
+            "apps.payments.management.commands.process_ticket_sheet_syncs.create_google_sheets_client",
+            return_value=sheets_client,
+        ):
+            call_command(
+                "process_ticket_sheet_syncs",
+                "--limit",
+                "50",
+                stdout=StringIO(),
+            )
+
+        sync.refresh_from_db()
+        self.assertEqual(sync.status, TicketSheetSync.Status.SYNCED)
+        self.assertEqual(sync.attempt_count, 0)
+        self.assertEqual(sheets_client.upsert_ticket_row.call_count, 2)
+
     def test_check_in_updates_the_existing_ticket_row(self):
         _, tickets = self.make_registration(
             source=Registration.Source.ON_SPOT,
@@ -423,6 +520,28 @@ class TicketSheetSyncTests(TestCase):
         )
         self.assertEqual(data.data["row"]["ticket_status"], "CANCELLED")
         self.assertEqual(data.data["row"]["scan_status"], "NOT_CHECKED_IN")
+
+    def test_backfill_requeues_used_and_cancelled_tickets_without_sync_rows(self):
+        used_ticket = self.make_paid_online_ticket(number=30)
+        cancelled_ticket = self.make_paid_online_ticket(number=31)
+        scan_ticket(token=used_ticket.token, scanner=self.admin)
+        cancel_ticket(cancelled_ticket.id, self.admin)
+        TicketSheetSync.objects.filter(
+            ticket__in=(used_ticket, cancelled_ticket)
+        ).delete()
+
+        queued_count = backfill_ticket_sheet_syncs()
+
+        self.assertEqual(queued_count, 2)
+        self.assertEqual(
+            set(
+                TicketSheetSync.objects.filter(
+                    ticket__in=(used_ticket, cancelled_ticket),
+                    status=TicketSheetSync.Status.PENDING,
+                ).values_list("ticket_id", flat=True)
+            ),
+            {used_ticket.id, cancelled_ticket.id},
+        )
 
     def test_disabled_email_compatibility_routes_do_not_change_sheet_sync(self):
         ticket = self.make_paid_online_ticket()

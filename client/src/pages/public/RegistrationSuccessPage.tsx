@@ -1,14 +1,12 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { ArrowRight, CheckCircle2, Clock3, Download, Ticket as TicketIcon } from 'lucide-react';
-import { ApiError, apiBlob } from '../../api/http';
+import { apiBlob } from '../../api/http';
 import { paymentsApi, type PaymentProofStatusResponse } from '../../api/payments';
-import { mapRegistration, mapTicket } from '../../api/serializers';
 import { Navbar } from '../../components/common/Navbar';
 import { Footer } from '../../components/common/Footer';
 import { FestivalMotifs } from '../../components/common/FestivalMotifs';
 import { DigitalTicket } from '../../components/ticket/DigitalTicket';
-import { Registration, Ticket } from '../../types';
 
 const ManualPaymentProofPage: React.FC<{
   registrationId: string;
@@ -355,126 +353,6 @@ const ManualPaymentProofPage: React.FC<{
   );
 };
 
-const PayURegistrationSuccessPage: React.FC = () => {
-  const location = useLocation();
-  const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const state = location.state as {
-    registration?: Registration;
-    ticket?: Ticket;
-    tickets?: Ticket[];
-  } | undefined;
-  const registration = state?.registration;
-  const ticket = state?.ticket;
-  const tickets = state?.tickets ?? (ticket ? [ticket] : []);
-  const txnid = searchParams.get('txnid') || '';
-  const [paymentMessage, setPaymentMessage] = useState(
-    'Payment is still being confirmed by PayU. No final ticket is available yet.',
-  );
-
-  useEffect(() => {
-    if (!txnid || registration) return;
-    let active = true;
-    let refreshing = false;
-    const refresh = async () => {
-      if (refreshing) return;
-      refreshing = true;
-      try {
-        const idempotencyKey = sessionStorage.getItem(
-          `ticketing.payment-idempotency.${txnid}`,
-        );
-        if (!idempotencyKey) {
-          setPaymentMessage('This payment cannot be verified in this browser session. Contact the event team.');
-          return;
-        }
-        const payment = await paymentsApi.status(txnid, idempotencyKey);
-        if (!active) return;
-        if (payment.payment_verified && payment.registration && payment.tickets) {
-          const confirmedTickets = payment.tickets.map(mapTicket);
-          navigate('/registration/success', {
-            replace: true,
-            state: {
-              registration: mapRegistration(payment.registration),
-              ticket: confirmedTickets[0],
-              tickets: confirmedTickets,
-            },
-          });
-        } else if (payment.payment_status === 'FAILED') {
-          setPaymentMessage('PayU reported that this payment failed or was cancelled. No tickets have been issued.');
-        } else {
-          setPaymentMessage(
-            payment.verification_message
-              || 'Payment is still being confirmed. Do not pay again while it is processing.',
-          );
-        }
-      } catch (error) {
-        if (!active) return;
-        setPaymentMessage(
-          error instanceof ApiError
-            ? error.message
-            : 'Payment status could not be checked. Please try again.',
-        );
-      } finally {
-        refreshing = false;
-      }
-    };
-    void refresh();
-    const interval = window.setInterval(() => void refresh(), 5000);
-    return () => {
-      active = false;
-      window.clearInterval(interval);
-    };
-  }, [txnid, registration, navigate]);
-
-  return (
-    <div className="festival-public flex min-h-screen flex-col bg-slate-950 text-slate-100">
-      <Navbar />
-      <main className="festival-hero mx-auto w-full max-w-4xl flex-1 px-4 pb-24 pt-32 sm:px-6">
-        <FestivalMotifs />
-        {registration && ticket ? (
-          <>
-            <header className="mb-8 text-center">
-              <CheckCircle2 className="mx-auto mb-4 h-12 w-12 text-emerald-400" />
-              <h1 className="font-display text-3xl font-bold text-white">Registration confirmed</h1>
-              <p className="mt-2 text-sm text-slate-300">Payment verified. Present the final ticket QR code at entry.</p>
-              <p className="mt-3 font-mono text-xs text-slate-400">
-                Registration: {registration.registrationCode || registration.id}
-              </p>
-            </header>
-            <div className="space-y-8">
-              {tickets.map((issuedTicket) => (
-                <DigitalTicket key={issuedTicket.id} ticket={issuedTicket} showActions />
-              ))}
-            </div>
-          </>
-        ) : txnid ? (
-          <section className="mx-auto max-w-lg rounded-2xl border border-slate-800 bg-slate-900 p-8 text-center">
-            <Clock3 className="mx-auto mb-4 h-10 w-10 text-amber-300" />
-            <h1 className="font-display text-2xl font-bold text-white">Payment confirmation</h1>
-            <p role="status" className="mt-3 text-sm leading-relaxed text-slate-300">{paymentMessage}</p>
-            <p className="mt-4 break-all font-mono text-xs text-slate-500">Transaction: {txnid}</p>
-          </section>
-        ) : (
-          <section className="mx-auto max-w-lg rounded-2xl border border-slate-800 bg-slate-900 p-8 text-center">
-            <TicketIcon className="mx-auto mb-4 h-10 w-10 text-indigo-300" />
-            <h1 className="font-display text-2xl font-bold text-white">No registration confirmation found</h1>
-            <p className="mt-2 text-sm leading-relaxed text-slate-400">
-              Use the secure payment link from your registration to view status and submit proof.
-            </p>
-            <Link
-              to="/events"
-              className="mt-6 inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-500"
-            >
-              Back to Dhandiya Night <ArrowRight className="h-4 w-4" />
-            </Link>
-          </section>
-        )}
-      </main>
-      <Footer />
-    </div>
-  );
-};
-
 export const RegistrationSuccessPage: React.FC = () => {
   const [searchParams] = useSearchParams();
   const location = useLocation();
@@ -488,5 +366,26 @@ export const RegistrationSuccessPage: React.FC = () => {
       />
     );
   }
-  return <PayURegistrationSuccessPage />;
+  return (
+    <div className="festival-public flex min-h-screen flex-col bg-slate-950 text-slate-100">
+      <Navbar />
+      <main className="festival-hero mx-auto w-full max-w-4xl flex-1 px-4 pb-24 pt-32 sm:px-6">
+        <FestivalMotifs />
+        <section className="mx-auto max-w-lg rounded-2xl border border-slate-800 bg-slate-900 p-8 text-center">
+          <TicketIcon className="mx-auto mb-4 h-10 w-10 text-indigo-300" />
+          <h1 className="font-display text-2xl font-bold text-white">No registration confirmation found</h1>
+          <p className="mt-2 text-sm leading-relaxed text-slate-400">
+            Use the secure payment link from your registration to view status and submit proof.
+          </p>
+          <Link
+            to="/events"
+            className="mt-6 inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-500"
+          >
+            Back to Dhandiya Night <ArrowRight className="h-4 w-4" />
+          </Link>
+        </section>
+      </main>
+      <Footer />
+    </div>
+  );
 };

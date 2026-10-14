@@ -1,10 +1,13 @@
+import base64
 import os
 import uuid
 from datetime import timedelta
-from unittest.mock import Mock, patch
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.test import TestCase, override_settings
 from django.utils import timezone
@@ -14,14 +17,19 @@ from apps.audit.models import AuditLog
 from apps.events.models import Event, TicketTier
 from apps.payments.models import (
     Payment,
-    PaymentIntent,
     TicketDelivery,
     TicketSheetSync,
 )
 from apps.registrations.models import Registration
+from apps.registrations.serializers import RegistrationSerializer
 from apps.scanning.models import Gate, StaffAssignment, TicketScan
 from apps.registrations.services import RegistrationConflict, create_registration
 from apps.tickets.models import Ticket
+
+
+TEST_PAYMENT_SCREENSHOT = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAE0lEQVR4nGP8//8/AwMDEwMYAAAkBgMBXaJOiAAAAABJRU5ErkJggg=="
+)
 
 
 class CanonicalEventSeedTests(TestCase):
@@ -146,13 +154,7 @@ class AdminBootstrapTests(TestCase):
         self.assertFalse(get_user_model().objects.exists())
 
 
-@override_settings(
-    PAYU_MERCHANT_KEY="payu-test-key",
-    PAYU_MERCHANT_SALT="payu-test-salt",
-    PAYU_ENVIRONMENT="test",
-    PAYU_FRONTEND_URL="https://tickets.example.test",
-    DJANGO_INTERNAL_API_KEY="n8n-test-token",
-)
+@override_settings(DJANGO_INTERNAL_API_KEY="n8n-test-token")
 class TicketingApiTests(TestCase):
     def setUp(self):
         self.client = APIClient()
@@ -299,47 +301,15 @@ class TicketingApiTests(TestCase):
         )
         self.assertEqual(len(tickets), 4)
 
-    def payment_order(self, payload, key, provider=None):
+    def start_manual_registration(self, payload, key):
         return self.client.post(
-            "/api/v1/payments/create-order/",
+            "/api/v1/payments/proof/registrations/",
             payload,
             format="json",
             HTTP_IDEMPOTENCY_KEY=str(key),
         )
 
-    def verify_order(self, order_id, provider=None):
-        payment = Payment.objects.select_related("intent").get(
-            provider_order_id=order_id
-        )
-        details = {
-            "txnid": order_id,
-            "mihpayid": f"payu-{payment.id.hex}",
-            "amount": f"{payment.amount / 100:.2f}",
-            "productinfo": "Dhandiya Night Tickets",
-            "firstname": payment.intent.buyer_name.strip().split(maxsplit=1)[0][:60],
-            "email": payment.intent.buyer_email,
-            "udf1": str(payment.intent_id),
-            "udf2": str(payment.id),
-            "status": "success",
-            "unmappedstatus": "captured",
-        }
-        response = Mock()
-        response.raise_for_status.return_value = None
-        response.json.return_value = {
-            "status": 1,
-            "transaction_details": {order_id: details},
-        }
-        idempotency_key = str(payment.intent_id)
-        with patch("apps.payments.services.requests.post", return_value=response):
-            return self.client.get(
-                "/api/v1/payments/status/",
-                {
-                    "txnid": order_id,
-                    "idempotency_key": idempotency_key,
-                },
-            )
-
-    def create_online_registration(self, tier=None, buyer=None):
+    def create_manual_registration(self, tier=None, buyer=None, **overrides):
         payload = self.registration_payload(tier)
         if tier == self.combo:
             payload["attendee_names"] = [
@@ -350,19 +320,69 @@ class TicketingApiTests(TestCase):
             ]
         if buyer:
             payload["buyer"].update(buyer)
-        order = self.payment_order(payload, uuid.uuid4())
-        if order.status_code >= 400 or order.data.get("payment_verified"):
-            return order
-        return self.verify_order(order.data["order_id"])
+        payload.update(overrides)
+        return self.start_manual_registration(payload, uuid.uuid4())
 
+    def create_online_registration(self, tier=None, buyer=None):
+        reservation = self.create_manual_registration(tier=tier, buyer=buyer)
+        if reservation.status_code >= 400:
+            return reservation
 
+        registration_id = reservation.data["registration_id"]
+        with patch(
+            "apps.payments.proof.upload_payment_proof",
+            return_value={
+                "public_id": f"test/{uuid.uuid4()}",
+                "asset_id": str(uuid.uuid4()),
+                "version": 1,
+                "format": "png",
+                "size": len(TEST_PAYMENT_SCREENSHOT),
+            },
+        ):
+            proof_response = self.client.post(
+                f"/api/v1/payments/proof/registrations/{registration_id}/submit/",
+                {
+                    "utr_reference": f"UTR{uuid.uuid4().hex}",
+                    "transaction_id": f"TXN{uuid.uuid4().hex}",
+                    "screenshot": SimpleUploadedFile(
+                        "payment.png",
+                        TEST_PAYMENT_SCREENSHOT,
+                        content_type="image/png",
+                    ),
+                },
+                format="multipart",
+                HTTP_X_PROOF_ACCESS_TOKEN=reservation.data["proof_access_token"],
+                HTTP_IDEMPOTENCY_KEY=str(uuid.uuid4()),
+            )
+        if proof_response.status_code >= 400:
+            return proof_response
 
+        admin_client = APIClient()
+        admin_client.force_authenticate(self.admin)
+        approval = admin_client.post(
+            f"/api/v1/payments/proof/{proof_response.data['payment_id']}/approve/",
+            {"confirmed_received": True},
+            format="json",
+        )
+        if approval.status_code >= 400:
+            return approval
 
+        registration = Registration.objects.prefetch_related("tickets").get(
+            pk=registration_id,
+        )
+        serialized = RegistrationSerializer(registration).data
+        return SimpleNamespace(
+            status_code=200,
+            data={
+                "registration": serialized,
+                "tickets": serialized["tickets"],
+                "delivery_status": "DISABLED",
+            },
+        )
 
-
-    def test_registration_codes_increment_in_order_and_keep_uuid_for_api_identity(self):
-        first = self.create_online_registration()
-        second = self.create_online_registration(
+    def test_manual_reservations_increment_registration_codes_and_keep_uuid_identity(self):
+        first = self.create_manual_registration()
+        second = self.create_manual_registration(
             buyer={
                 "name": "Another Buyer",
                 "email": "another@example.test",
@@ -370,21 +390,19 @@ class TicketingApiTests(TestCase):
         )
 
         expected_prefix = f"SIMS-DN-{self.event.start_at.year}-"
-        self.assertEqual(first.status_code, 200, first.data)
-        self.assertEqual(second.status_code, 200, second.data)
-        self.assertTrue(first.data["registration"]["id"])
+        self.assertEqual(first.status_code, 201, first.data)
+        self.assertEqual(second.status_code, 201, second.data)
+        self.assertTrue(first.data["registration_id"])
         self.assertEqual(
-            first.data["registration"]["registration_code"],
+            first.data["registration_code"],
             f"{expected_prefix}00001",
         )
         self.assertEqual(
-            second.data["registration"]["registration_code"],
+            second.data["registration_code"],
             f"{expected_prefix}00002",
         )
-        self.assertEqual(
-            first.data["tickets"][0]["registration_code"],
-            f"{expected_prefix}00001",
-        )
+        self.assertEqual(Registration.objects.count(), 2)
+        self.assertEqual(Ticket.objects.count(), 0)
 
     def test_public_event_uses_canonical_backend_identity_and_live_capacity(self):
         canonical = Event.objects.create(
@@ -436,41 +454,40 @@ class TicketingApiTests(TestCase):
 
         self.assertEqual(response.status_code, 401)
 
-    def test_online_combo_creates_four_independently_scannable_tickets(self):
-        response = self.create_online_registration(self.combo)
-        self.assertEqual(response.status_code, 200, response.data)
-        self.assertEqual(len(response.data["tickets"]), 4)
-        self.assertEqual(response.data["registration"]["source"], Registration.Source.ONLINE)
+    def test_manual_combo_reserves_four_tickets_without_issuing_before_approval(self):
+        response = self.create_manual_registration(self.combo)
+        self.assertEqual(response.status_code, 201, response.data)
+        registration = Registration.objects.get(pk=response.data["registration_id"])
+        intent = registration.payment_intent
+        self.assertEqual(registration.source, Registration.Source.ONLINE)
+        self.assertEqual(intent.quantity, 1)
         self.assertEqual(
-            len({ticket["qr_token"] for ticket in response.data["tickets"]}),
-            4,
-        )
-        self.assertEqual(
-            [ticket["attendee_name"] for ticket in response.data["tickets"]],
+            intent.attendee_names,
             ["Attendee One", "Attendee Two", "Attendee Three", "Attendee Four"],
         )
-        self.assertEqual(Ticket.objects.filter(registration_id=response.data["registration"]["id"]).count(), 4)
+        self.assertEqual(Ticket.objects.filter(registration=registration).count(), 0)
         self.assertEqual(self.event.registrations.count(), 1)
         self.assertEqual(AuditLog.objects.filter(action="REGISTRATION_CREATED").count(), 1)
         self.assertEqual(TicketDelivery.objects.count(), 0)
-        self.assertEqual(response.data["delivery_status"], "DISABLED")
+        self.assertEqual(Payment.objects.count(), 0)
 
     def test_combo_requires_a_name_for_each_ticket(self):
         payload = self.registration_payload(self.combo)
-        response = self.payment_order(payload, uuid.uuid4())
+        response = self.start_manual_registration(payload, uuid.uuid4())
         self.assertEqual(response.status_code, 400)
         self.assertIn("attendee_names", response.data["error"]["details"])
         self.assertEqual(Registration.objects.count(), 0)
 
         payload["attendee_names"] = ["One", "Two", "Three"]
-        response = self.payment_order(payload, uuid.uuid4())
+        response = self.start_manual_registration(payload, uuid.uuid4())
         self.assertEqual(response.status_code, 400)
         self.assertEqual(Registration.objects.count(), 0)
 
     def test_client_cannot_choose_registration_source(self):
-        response = self.create_online_registration()
-        self.assertEqual(response.status_code, 200, response.data)
-        self.assertEqual(response.data["registration"]["source"], Registration.Source.ONLINE)
+        response = self.create_manual_registration(source=Registration.Source.ON_SPOT)
+        self.assertEqual(response.status_code, 201, response.data)
+        registration = Registration.objects.get(pk=response.data["registration_id"])
+        self.assertEqual(registration.source, Registration.Source.ONLINE)
 
     def test_public_registration_endpoint_cannot_issue_unpaid_tickets(self):
         response = self.client.post(
@@ -557,7 +574,7 @@ class TicketingApiTests(TestCase):
         payload["buyer"]["name"] = "Buyer 12"
         payload["buyer"]["phone"] = "123"
         response = self.client.post(
-            "/api/v1/payments/create-order/",
+            "/api/v1/payments/proof/registrations/",
             payload,
             format="json",
             HTTP_IDEMPOTENCY_KEY=str(uuid.uuid4()),
@@ -699,13 +716,13 @@ class TicketingApiTests(TestCase):
             "http://localhost:3001",
         ]
     )
-    def test_local_vite_origin_can_submit_csrf_protected_payment_requests(self):
+    def test_local_vite_origin_can_submit_csrf_protected_manual_payment_requests(self):
         origin = "http://localhost:3001"
         client = APIClient(enforce_csrf_checks=True)
         csrf_token = client.get("/api/v1/auth/csrf/").data["csrfToken"]
 
         response = client.post(
-            "/api/v1/payments/create-order/",
+            "/api/v1/payments/proof/registrations/",
             {},
             format="json",
             HTTP_ORIGIN=origin,
@@ -721,7 +738,7 @@ class TicketingApiTests(TestCase):
             HTTP_ORIGIN="https://ticketing-test.vercel.app",
         )
         preflight = self.client.options(
-            "/api/v1/payments/create-order/",
+            "/api/v1/payments/proof/registrations/",
             HTTP_ORIGIN="https://ticketing-test.vercel.app",
             HTTP_ACCESS_CONTROL_REQUEST_METHOD="POST",
             HTTP_ACCESS_CONTROL_REQUEST_HEADERS="content-type,idempotency-key,x-csrftoken",

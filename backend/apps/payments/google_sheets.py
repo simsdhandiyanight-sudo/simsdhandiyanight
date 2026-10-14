@@ -122,15 +122,24 @@ class GoogleSheetsClient:
         )
 
     def _append_values(self, title, values):
+        last_column = self._column_name(len(SHEET_HEADERS))
         self._request(
             "POST",
-            f"/values/{self._quoted_range(title, 'A:X')}:append",
+            f"/values/{self._quoted_range(title, f'A:{last_column}')}:append",
             params={
                 "valueInputOption": "RAW",
                 "insertDataOption": "INSERT_ROWS",
             },
             json={"majorDimension": "ROWS", "values": [values]},
         )
+
+    @staticmethod
+    def _column_name(column_number):
+        column_name = ""
+        while column_number:
+            column_number, remainder = divmod(column_number - 1, 26)
+            column_name = chr(ord("A") + remainder) + column_name
+        return column_name
 
     def _clear_values(self, title):
         self._request(
@@ -255,9 +264,10 @@ class GoogleSheetsClient:
             )
         if matches:
             target_row = matches[0]
+            last_column = self._column_name(len(SHEET_HEADERS))
             self._write_values(
                 title,
-                f"A{target_row}:X{target_row}",
+                f"A{target_row}:{last_column}{target_row}",
                 [row_values],
             )
             return "UPDATED"

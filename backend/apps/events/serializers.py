@@ -25,7 +25,7 @@ class TicketTierPublicSerializer(serializers.Serializer):
             event.capacity
             - self.context.get("active_ticket_count", 0)
             - getattr(event, "active_reserved_units", 0)
-            - getattr(event, "active_payu_reserved_units", 0),
+            - getattr(event, "active_legacy_payment_reserved_units", 0),
         )
         return remaining // tier.admission_count if tier.is_available else 0
 

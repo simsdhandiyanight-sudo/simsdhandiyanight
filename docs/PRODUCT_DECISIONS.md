@@ -22,7 +22,7 @@ This document records decisions needed to move the current Dhandiya Night demo t
 
 **DECIDED**
 
-- The current configured offers are ₹149 for one admission and ₹745 for the six-admission combo. PayU checkout charges an additional fixed ₹4 per admission (₹153 for a single ticket and ₹769 for the combo); the additional charge is not shown on the registration page.
+- The current configured offers are ₹149 for one admission and ₹745 for the six-admission combo. Customers pay the displayed offer price using the existing manual UPI flow; no additional provider charge is added.
 - The combo covers six admissions: five paid admissions and one included free admission. One buyer/contact may purchase/register the combo; the backend creates six independently scannable tickets under that registration.
 - The combo consumes six units of event admission capacity. The offer itself is one purchasable package; package availability and admission capacity are distinct quantities.
 - The buyer's registration is not a substitute for the six ticket credentials. Entry is validated per ticket.
@@ -62,18 +62,17 @@ This document records decisions needed to move the current Dhandiya Night demo t
 
 **DECIDED**
 
-- The ticket-offer prices shown in the product UI are ₹149 for one admission and ₹745 for the six-admission combo; the currency is INR. PayU collects an additional fixed ₹4 per admission, included in the order amount but not shown on the registration page.
-- The PayU hosted checkout persists payment intents and payment attempts. Online tickets are issued only after backend response-hash validation and PayU Verify Payment API confirmation verifies a captured payment matching the stored transaction and booking details.
-- Payment state, registration state, and individual ticket state are separate concepts. A browser callback cannot establish payment success or failure; ticket creation requires backend payment verification.
-- A verified payment creates one registration, the corresponding tickets and QR tokens, and a retryable backend PDF/email delivery record.
+- The ticket-offer prices shown in the product UI are ₹149 for one admission and ₹745 for the six-admission combo; the currency is INR. The displayed amount is the manual UPI payment amount.
+- The customer submits a UTR, transaction ID, and proof after paying. An authorized administrator verifies receipt against bank/UPI records; only approval marks the manual payment verified and issues the corresponding individual tickets and QR tokens.
+- Payment state, registration state, and individual ticket state are separate concepts. A customer submission or browser request cannot establish payment success; ticket creation requires administrator verification.
+- An approved manual payment creates the corresponding tickets and QR tokens. Email delivery is disabled; tickets remain available through the secure payment-proof page.
 - Payment verification is the only financial action supported by the application. Refunds and settlement reversals are not supported, and the application must never initiate them.
-- If a provider-confirmed captured payment cannot be matched or its tickets cannot be issued, preserve the captured payment and audit details, mark it `ADMIN_REVIEW_REQUIRED`, and expose it to administrators for manual handling outside the application. Do not issue an automatic refund.
-- Production payments require activated organization credentials and separate production configuration. Test-mode validation does not establish production readiness.
-- The ₹4 per-admission charge is a fixed additional charge, not a percentage-based tax calculation. Tax applicability and treatment remain undecided.
+- Historical gateway payment records and transaction references are retained for auditability, but no hosted checkout, callback, webhook, or automatic reconciliation flow is active.
+- If an approved payment cannot be matched or its tickets cannot be issued, preserve the payment and audit details and expose the case for administrator review. Do not issue an automatic refund.
 
 **UNRESOLVED**
 
-- Production payment methods and settlement behavior.
+- Bank/UPI reconciliation and settlement procedures outside the application.
 - Tax applicability, taxable base, rate, and receipt/invoice requirements for any applicable tax.
 - Whether an event-level `payment_required` setting is needed for future free or differently-priced events.
 
@@ -94,11 +93,13 @@ This document records decisions needed to move the current Dhandiya Night demo t
 - This stable identity replaces the frontend demo ID `evt-technova-2026`; that demo ID must not be used as the production event identity.
 - The backend is the source of truth for the event. The frontend obtains the event and its canonical ID from the events API rather than hardcoding a demo ID.
 
-## 8. Remaining decisions before production payment/ticket activation
+## 8. Remaining decisions for future payment/ticket changes
 
-The unresolved items above require product-owner and organization decisions before live payment processing or production release:
+The manual UPI payment and administrator-verification flow is active. The
+following decisions apply to future changes and do not replace or block that
+existing workflow:
 
-1. PayU merchant activation, production credentials, production callback/webhook configuration, verification, and settlement readiness.
+1. Configure and verify the organization's manual UPI payment instructions and admin bank-verification process.
 2. Tax handling for the single and combo offers.
 3. Whole-order cancellation behavior, including combos containing already-used tickets. Refunds remain unsupported.
-5. Whether to show advisory duplicate-registration warnings.
+4. Whether to show advisory duplicate-registration warnings.

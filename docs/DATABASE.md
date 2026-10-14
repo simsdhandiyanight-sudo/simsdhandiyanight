@@ -150,7 +150,7 @@ admission_count
 availability
 ```
 
-For Dhandiya Night, the registration page shows INR 149 for one admission and INR 745 for a six-admission combo. PayU requests add a fixed ₹4 per admission (₹153 and ₹769 total for one offer, respectively); this charge is included in the persisted payment amount in minor currency units and is not shown on the registration page. `admission_count` describes the admissions issued for one selected offer. `PaymentIntent.quantity` stores the number of offers in the order, so capacity reserves `quantity * admission_count` admissions and each resulting admission becomes an individual ticket. Capacity is reserved while payment is pending and consumed when tickets are issued.
+For Dhandiya Night, the registration page shows INR 149 for one admission and INR 745 for a six-admission combo. Manual UPI instructions use the configured offer price without an additional payment-provider charge. `admission_count` describes the admissions issued for one selected offer. `PaymentIntent.quantity` stores the number of offers in the order, so capacity reserves `quantity * admission_count` admissions and each resulting admission becomes an individual ticket. Capacity is reserved while payment is pending and consumed when tickets are issued.
 
 ---
 
@@ -203,7 +203,7 @@ The registration model does not impose uniqueness on buyer email or phone. A dif
 Stores an idempotent online registration/payment attempt, normalized request fingerprint, buyer and attendee details, offer quantity, pending capacity reservation, and an optional link to the verified registration. The UUID idempotency key is the primary key. A captured payment whose ticket issuance needs investigation moves the intent to `REVIEW_REQUIRED`.
 
 ## Payment
-Stores each payment-provider transaction, amount, currency, lifecycle status, verification status, capture time, ticket-issuance status, expiry, and failure/verification metadata. Provider transaction and payment IDs are unique. The provider field distinguishes PayU payments from retained historical Razorpay records; the migration renames provider ID columns in place without dropping existing values. A conditional database uniqueness constraint permits at most one verified captured payment per payment intent. Captured payments whose tickets were not issued or whose registration is incomplete are retained and reported for administrator review; the application has no refund or settlement-reversal operation.
+Stores each payment transaction, amount, currency, lifecycle status, verification status, capture time, ticket-issuance status, expiry, and failure/verification metadata. Provider transaction and payment IDs are unique. The provider field distinguishes current manual UPI payments from historical gateway and on-spot records. Legacy provider values, provider transaction IDs, and verification-attempt records are retained for auditability; removing the retired checkout does not require a schema migration or rewrite. A conditional database uniqueness constraint permits at most one verified captured payment per payment intent. Payments whose tickets were not issued or whose registration is incomplete are retained and reported for administrator review; the application has no refund or settlement-reversal operation.
 
 ## TicketDelivery
 Retains historical email/PDF delivery state, including recipient, attempt count, last error, and sent time. New email delivery records are no longer created; existing rows remain for audit/reporting and do not control ticket validity.

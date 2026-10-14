@@ -16,7 +16,6 @@ export default function AdminPaymentReviewPage() {
   const [error, setError] = useState('');
   const [proofError, setProofError] = useState('');
   const [loading, setLoading] = useState(true);
-  const [reconciling, setReconciling] = useState<string | null>(null);
   const [processingProof, setProcessingProof] = useState<string | null>(null);
   const [proofToReject, setProofToReject] = useState<ManualPaymentProof | null>(null);
   const [rejectionReason, setRejectionReason] = useState('');
@@ -58,19 +57,6 @@ export default function AdminPaymentReviewPage() {
       );
     }
   }, []);
-
-  const reconcile = async (paymentId: string) => {
-    setReconciling(paymentId);
-    setError('');
-    try {
-      await paymentReviewApi.reconcile(paymentId);
-      await loadDashboard();
-    } catch (reconcileError) {
-      setError(reconcileError instanceof Error ? reconcileError.message : 'Unable to reconcile this payment.');
-    } finally {
-      setReconciling(null);
-    }
-  };
 
   const approveProof = async (proof: ManualPaymentProof) => {
     const confirmed = window.confirm(
@@ -302,7 +288,7 @@ export default function AdminPaymentReviewPage() {
             <div className="rounded-lg bg-amber-950 p-2 text-amber-300"><CreditCard className="h-4 w-4" /></div>
             <div>
               <h2 className="font-semibold text-white">Payments needing review</h2>
-              <p className="text-xs text-slate-400">Unresolved PayU verification and captured payments needing registration or ticket recovery are listed here.</p>
+              <p className="text-xs text-slate-400">Payment records with missing or inconsistent registration and ticket issuance are listed here, including historical provider records.</p>
             </div>
           </div>
           {loading && !dashboard ? (
@@ -322,7 +308,6 @@ export default function AdminPaymentReviewPage() {
                     <th className="px-4 py-3">Tickets</th>
                     <th className="px-4 py-3">Issues</th>
                     <th className="px-4 py-3">Recorded failure</th>
-                    <th className="px-4 py-3">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800">
@@ -356,18 +341,6 @@ export default function AdminPaymentReviewPage() {
                         </div>
                       </td>
                       <td className="max-w-sm px-4 py-4 text-slate-300">{payment.failure || 'No failure detail recorded.'}</td>
-                      <td className="px-4 py-4">
-                        {payment.provider === 'PAYU' && (
-                          <button
-                            type="button"
-                            onClick={() => void reconcile(payment.payment_id)}
-                            disabled={reconciling !== null}
-                            className="rounded-lg border border-indigo-700 bg-indigo-950 px-3 py-2 text-xs text-indigo-200 hover:bg-indigo-900 disabled:opacity-50"
-                          >
-                            {reconciling === payment.payment_id ? 'Reconciling…' : 'Retry verification'}
-                          </button>
-                        )}
-                      </td>
                     </tr>
                   ))}
                 </tbody>

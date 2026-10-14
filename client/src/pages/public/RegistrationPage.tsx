@@ -156,11 +156,21 @@ export const RegistrationPage: React.FC = () => {
     return Object.values(errors).every((error) => !error);
   };
 
-  const handleNextStep1 = (e: React.FormEvent) => {
+  const handleNextPersonalDetails = (e: React.FormEvent) => {
     e.preventDefault();
-    if (validateStep1()) {
-      setStep(2);
+    if (!validateStep1()) return;
+
+    if (ticketCount > 1) {
+      const names = [fullName, ...attendeeNames.slice(0, ticketCount - 1)];
+      const hasInvalidName = names.some((name) => getFieldError('fullName', name));
+      if (hasInvalidName) {
+        setErrorMessage(`Enter a valid name for each of the ${ticketCount} attendees.`);
+        return;
+      }
     }
+
+    setErrorMessage('');
+    setStep(3);
   };
 
   const handleReviewTier = () => {
@@ -172,20 +182,12 @@ export const RegistrationPage: React.FC = () => {
       setErrorMessage('The selected quantity is no longer available. Choose an available quantity.');
       return;
     }
-    if (ticketCount > 1) {
-      const names = [fullName, ...attendeeNames.slice(0, ticketCount - 1)];
-      const hasInvalidName = names.some((name) => getFieldError('fullName', name));
-      if (hasInvalidName) {
-        setErrorMessage(`Enter a valid name for each of the ${ticketCount} attendees.`);
-        return;
-      }
-    }
     if (quantity < 1 || quantity > maxQuantity) {
       setErrorMessage('The selected quantity is no longer available. Choose an available quantity.');
       return;
     }
     setErrorMessage('');
-    setStep(3);
+    setStep(2);
   };
 
   const handleSubmitRegistration = async () => {
@@ -300,10 +302,10 @@ export const RegistrationPage: React.FC = () => {
         <div className="mb-10">
           <div className="flex items-center justify-between text-xs font-mono mb-2">
             <span className={step >= 1 ? 'text-indigo-400 font-bold' : 'text-slate-500'}>
-              01. Personal Details
+              01. Pass Tier
             </span>
             <span className={step >= 2 ? 'text-indigo-400 font-bold' : 'text-slate-500'}>
-              02. Pass Tier
+              02. Personal Details
             </span>
             <span className={step >= 3 ? 'text-indigo-400 font-bold' : 'text-slate-500'}>
               03. Review &amp; Confirm
@@ -317,10 +319,10 @@ export const RegistrationPage: React.FC = () => {
           </div>
         </div>
 
-        {/* STEP 1: Personal Details */}
-        {step === 1 && (
+        {/* STEP 2: Personal Details */}
+        {step === 2 && (
           <form
-            onSubmit={handleNextStep1}
+            onSubmit={handleNextPersonalDetails}
             className="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-8 space-y-6"
           >
             <div>
@@ -459,15 +461,15 @@ export const RegistrationPage: React.FC = () => {
                 type="submit"
                 className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50 text-white rounded-xl text-xs font-semibold inline-flex items-center gap-2 cursor-pointer transition-all shadow-md"
               >
-                <span>Continue to Pass Tier</span>
+                <span>Continue to Review</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>
           </form>
         )}
 
-        {/* STEP 2: Pass Tier Selection */}
-        {step === 2 && (
+        {/* STEP 1: Pass Tier Selection */}
+        {step === 1 && (
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-8 space-y-6">
             <div>
               <h2 className="text-lg font-bold font-display text-white">Select Admission Tier</h2>
@@ -620,23 +622,11 @@ export const RegistrationPage: React.FC = () => {
             <div className="pt-4 border-t border-slate-800 flex justify-between items-center">
               <button
                 type="button"
-                onClick={() => {
-                  setErrorMessage('');
-                  setStep(1);
-                }}
-                className="px-4 py-2.5 text-xs text-slate-400 hover:text-white inline-flex items-center gap-1.5 cursor-pointer"
-              >
-                <ArrowLeft className="w-4 h-4" />
-                <span>Back</span>
-              </button>
-
-              <button
-                type="button"
                 onClick={handleReviewTier}
                 disabled={!selectedTier || quantity > maxQuantity || availablePackages(selectedTier) < 1}
                 className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold inline-flex items-center gap-2 cursor-pointer transition-all shadow-md"
               >
-                <span>Review Registration</span>
+                <span>Continue to Personal Details</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>
