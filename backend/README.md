@@ -96,7 +96,7 @@ frontend or source control.
 
 The PostgreSQL `TicketSheetSync` outbox is authoritative for synchronization
 work. The Render cron runs
-`python manage.py process_ticket_sheet_syncs --limit 50` every five minutes
+`python manage.py process_ticket_sheet_syncs --limit 50` every minute
 and calls the official Google Sheets API with a server-side service account.
 Set `GOOGLE_SHEETS_SPREADSHEET_ID` and
 `GOOGLE_SHEETS_SERVICE_ACCOUNT_JSON` on the Render web service; the cron
