@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ArrowDown,
@@ -12,9 +12,20 @@ import { Footer } from '../../components/common/Footer';
 import { FestivalMotifs } from '../../components/common/FestivalMotifs';
 import { FestivalPoster } from '../../components/common/FestivalPoster';
 import { Navbar } from '../../components/common/Navbar';
+import { Modal } from '../../components/common/Modal';
 import { FEATURED_EVENT } from '../../mock/featuredEvent';
 
 const eventPath = '/events/dhandiya-night-2026';
+
+const eventGuidelines = [
+  { title: 'On-the-Spot Ticket Sales', detail: 'Begin at 5:00 PM.' },
+  { title: 'Event Start Time', detail: 'The celebrations will begin sharply at 6:00 PM.' },
+  { title: 'Reporting Time', detail: 'All attendees are requested to arrive and be inside the venue by 5:45 PM.' },
+  { title: 'Gate Closure', detail: 'Entry will close strictly at 7:00 PM.' },
+  { title: 'Strict Entry Policy', detail: 'No entry will be permitted after the gates close at 7:00 PM, even for ticket holders with valid tickets.' },
+];
+const eventGuidelinesClosing =
+  'Arrive on time, step into the festive spirit and get ready for an unforgettable Dhandiya Night!';
 
 const highlights = [
   {
@@ -39,6 +50,7 @@ const highlights = [
 
 export const LandingPage: React.FC = () => {
   const heroRef = useRef<HTMLElement>(null);
+  const [showEventGuidelines, setShowEventGuidelines] = useState(true);
 
   useEffect(() => {
     const revealItems = document.querySelectorAll<HTMLElement>('.festival-reveal');
@@ -81,6 +93,30 @@ export const LandingPage: React.FC = () => {
   return (
     <div className="festival-public min-h-screen">
       <Navbar />
+
+      <Modal
+        isOpen={showEventGuidelines}
+        onClose={() => setShowEventGuidelines(false)}
+        title="Important Event Guidelines – Dhandiya Night"
+        description="Please plan your arrival and entry accordingly."
+        maxWidth="lg"
+      >
+        <ul className="space-y-3 text-sm leading-relaxed text-slate-200">
+          {eventGuidelines.map(({ title, detail }) => (
+            <li key={title}><strong className="text-amber-300">{title}:</strong> {detail}</li>
+          ))}
+        </ul>
+        <p className="mt-4 text-sm leading-relaxed text-slate-300">
+          {eventGuidelinesClosing}
+        </p>
+        <button
+          type="button"
+          onClick={() => setShowEventGuidelines(false)}
+          className="mt-6 w-full rounded-xl bg-amber-500 px-4 py-3 text-sm font-semibold text-slate-950 transition-colors hover:bg-amber-400"
+        >
+          I Understand
+        </button>
+      </Modal>
 
       <main>
         <section
@@ -126,6 +162,25 @@ export const LandingPage: React.FC = () => {
               </Link>
             </div>
           </div>
+
+          <aside
+            aria-labelledby="event-guidelines-title"
+            className="z-[4] mt-5 w-full max-w-4xl rounded-2xl border border-amber-700/20 bg-white/80 p-5 text-left shadow-lg shadow-amber-950/5 backdrop-blur-sm sm:p-7"
+          >
+            <h2 id="event-guidelines-title" className="font-display text-lg font-bold text-rose-900 sm:text-xl">
+              Important Event Guidelines – Dhandiya Night
+            </h2>
+            <ul className="mt-4 grid gap-3 text-sm leading-relaxed text-slate-800 md:grid-cols-2">
+              {eventGuidelines.map(({ title, detail }) => (
+                <li key={title}>
+                  <strong className="text-amber-800">{title}:</strong> {detail}
+                </li>
+              ))}
+            </ul>
+            <p className="mt-4 border-t border-amber-800/15 pt-4 text-sm font-medium leading-relaxed text-rose-900">
+              {eventGuidelinesClosing}
+            </p>
+          </aside>
 
           <a className="festival-home-hero__scroll" href="#celebration">
             <span>THE NIGHT AWAITS</span>
