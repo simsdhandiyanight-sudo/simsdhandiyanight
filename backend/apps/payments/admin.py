@@ -1,6 +1,7 @@
 from django.contrib import admin
 from django.contrib import messages
 from django.db import transaction
+from django.utils import timezone
 import logging
 
 from .models import (
@@ -12,6 +13,7 @@ from .models import (
     TicketSheetSync,
 )
 from .sheets import ticket_sheet_sync_is_eligible
+from .apps_script_sync import schedule_ticket_sheet_syncs
 from apps.registrations.services import retry_on_spot_ticket_issuance
 
 logger = logging.getLogger(__name__)
@@ -88,22 +90,32 @@ class TicketSheetSyncAdmin(admin.ModelAdmin):
     def has_delete_permission(self, request, obj=None):
         return False
 
-    @admin.action(description="Retry selected eligible failed sheet syncs")
+    @admin.action(description="Dispatch selected eligible pending/failed sheet syncs")
     def retry_failed_syncs(self, request, queryset):
-        requeued = 0
+        now = timezone.now()
+        sync_ids = []
         with transaction.atomic():
-            for sync in queryset.select_for_update().filter(
-                status=TicketSheetSync.Status.FAILED
-            ):
+            for sync in queryset.select_for_update():
+                if sync.status == TicketSheetSync.Status.PROCESSING:
+                    if sync.lease_expires_at is None or sync.lease_expires_at > now:
+                        continue
+                    sync.status = TicketSheetSync.Status.PENDING
+                elif sync.status not in (
+                    TicketSheetSync.Status.PENDING,
+                    TicketSheetSync.Status.FAILED,
+                ):
+                    continue
                 if not ticket_sheet_sync_is_eligible(sync):
                     continue
-                sync.status = TicketSheetSync.Status.PENDING
-                sync.attempt_count = 0
-                sync.failure_reason = ""
+                if sync.status == TicketSheetSync.Status.FAILED:
+                    sync.status = TicketSheetSync.Status.PENDING
+                    sync.attempt_count = 0
+                    sync.last_attempt_at = None
+                    sync.failed_at = None
                 sync.retry_after = None
-                sync.last_attempt_at = None
                 sync.lease_expires_at = None
-                sync.failed_at = None
+                sync.resync_requested = False
+                sync.failure_reason = ""
                 sync.save(
                     update_fields=(
                         "status",
@@ -112,14 +124,17 @@ class TicketSheetSyncAdmin(admin.ModelAdmin):
                         "retry_after",
                         "last_attempt_at",
                         "lease_expires_at",
+                        "resync_requested",
                         "failed_at",
                         "updated_at",
                     )
                 )
-                requeued += 1
+                sync_ids.append(sync.id)
+            if sync_ids:
+                schedule_ticket_sheet_syncs(sync_ids)
         self.message_user(
             request,
-            f"Requeued {requeued} eligible sheet sync job(s).",
+            f"Scheduled {len(sync_ids)} eligible sheet sync job(s) for delivery.",
             messages.SUCCESS,
         )
 

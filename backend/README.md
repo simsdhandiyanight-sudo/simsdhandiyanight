@@ -95,18 +95,35 @@ frontend or source control.
 ### Google Sheets ticket register
 
 The PostgreSQL `TicketSheetSync` outbox is authoritative for synchronization
-work. The Render cron runs
-`python manage.py process_ticket_sheet_syncs --limit 50` every minute
-and calls the official Google Sheets API with a server-side service account.
-Set `GOOGLE_SHEETS_SPREADSHEET_ID` and
-`GOOGLE_SHEETS_SERVICE_ACCOUNT_JSON` on the Render web service; the cron
-inherits those secrets. Share the spreadsheet with the service account email
-as an Editor. Never put the service-account JSON in the frontend, workflow
-files, or source control. Keep `N8N_SHEET_SYNC_JOB_LEASE_MINUTES` consistent
-with the longest expected sync pass.
+work. After a successful admin approval commits, the backend sends eligible
+ticket rows to a locked Google Apps Script Web App for upsert. Configure
+`GOOGLE_APPS_SCRIPT_WEBHOOK_URL` with its deployed `/exec` URL and set
+`GOOGLE_APPS_SCRIPT_WEBHOOK_SECRET` to the same private secret stored in Apps
+Script Script Properties. These values belong on the Render web service only;
+never expose them to the frontend or commit the secret. Deployment
+instructions and the `Code.gs` implementation are in
+`integrations/google-apps-script/README.md`.
 
-The worker creates missing `Online_Tickets` and `OnSpot_Tickets` worksheets
-and their exact row-1 schema:
+The existing `GOOGLE_SHEETS_SPREADSHEET_ID` and
+`GOOGLE_SHEETS_SERVICE_ACCOUNT_JSON` settings remain available for the
+management-command recovery path. The routine Apps Script webhook uses the
+spreadsheet ID stored in Apps Script Script Properties and does not use those
+service-account credentials.
+
+Webhook delivery runs after transaction commit, outside payment/ticket row
+locks. Transient HTTP or Apps Script write failures receive up to three
+immediate attempts. A confirmed response marks the outbox job `SYNCED`;
+failures remain visible in Django admin as `FAILED` without changing payment
+approval, ticket issuance, or admission status. Django admin → Payments →
+Ticket sheet syncs can dispatch selected pending or failed eligible jobs.
+
+There is no always-running retry process: if the web process exits after the
+database commit but before its `on_commit` callback runs, the job remains
+pending until an administrator dispatches it from that page. This is a
+zero-additional-hosting-cost recovery path, not guaranteed background delivery.
+
+The Apps Script creates missing `Online_Tickets` and `OnSpot_Tickets`
+worksheets and their exact row-1 schema:
 
 `ticket_id`, `ticket_number`, `registration_id`, `ticket_type`,
 `booking_quantity`, `ticket_quantity`, `unit_price`, `name`, `email`, `phone`,
@@ -125,24 +142,22 @@ values repeat on each ticket row; aggregate booking totals by `registration_id`
 to avoid counting a multi-ticket booking more than once. Only tickets linked to
 a verified payment and saved QR token are eligible. Rows are upserted by the
 stable ticket UUID in `ticket_id`; QR tokens and payment screenshots are never
-exported. An existing nonmatching worksheet schema is copied to a `Legacy_*`
-worksheet before its known columns are mapped to the required schema; original
-rows remain in that archive. Unknown or duplicate ticket IDs or duplicate
-column headers stop migration without clearing the source sheet, and surface
-as failed syncs rather than being silently discarded. Empty worksheets receive
-the headers automatically.
+exported. Apps Script writes current headers to an empty worksheet. It accepts
+both the current schema and the known legacy 24-column schema, preserving
+legacy headers and order; legacy tabs cannot store
+`booking_quantity`, `ticket_quantity`, `unit_price`, `provider_order_id`, or
+`provider_payment_id` until separately migrated. Other nonmatching schemas are
+rejected without modification. Duplicate ticket IDs or duplicate column
+headers remain observable failures rather than being silently discarded.
 
 Cancellation and successful check-in changes requeue the same durable
-outbox record. Google API failures retry with bounded exponential backoff and
-become terminal after five attempts. Administrators can view and retry failed
-records from Django admin under Payments → Ticket sheet sync. A failed Sheets
-sync does not roll back registration, payment verification, ticket issuance,
-or check-in. The backfill includes issued, checked-in, and cancelled tickets
-with verified payments. Run `python manage.py backfill_ticket_sheet_syncs`
-after deploying a sheet-column change to refresh existing rows; its stable-ID
-upserts restore missing rows and overwrite outdated values without adding
-duplicates. The legacy n8n Sheets polling workflow should be disabled when the
-Render worker is enabled.
+outbox record. The backfill includes issued, checked-in, and cancelled tickets
+with verified payments. `python manage.py backfill_ticket_sheet_syncs`
+requeues eligible records and invokes the webhook for each; it can update all
+eligible historical tickets, so do not run it in production without explicit
+authorization. `process_ticket_sheet_syncs` remains a manual recovery path
+using the direct Google Sheets API service-account credentials. No Render
+cron is required for the Apps Script webhook.
 
 Payment screenshots are uploaded by the backend using the official Cloudinary
 SDK. Set `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and

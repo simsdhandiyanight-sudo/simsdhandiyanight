@@ -4,9 +4,12 @@ from io import StringIO
 from unittest.mock import Mock, patch
 
 import requests
+from django.contrib import admin
 from django.contrib.auth import get_user_model
+from django.contrib.messages.storage.fallback import FallbackStorage
+from django.contrib.sessions.middleware import SessionMiddleware
 from django.core.management import call_command
-from django.test import TestCase, override_settings
+from django.test import RequestFactory, TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
@@ -24,7 +27,7 @@ from apps.scanning.models import Gate, StaffAssignment, TicketScan
 from apps.scanning.services import scan_ticket
 from apps.tickets.services import cancel_ticket
 from apps.tickets.college_services import create_college_student_ticket
-from apps.tickets.models import CollegeStudentTicket
+from apps.tickets.models import CollegeStudentTicket, Ticket
 
 
 @override_settings(
@@ -139,6 +142,183 @@ class TicketSheetSyncTests(TestCase):
 
     def auth_headers(self):
         return {"HTTP_AUTHORIZATION": "Token sheet-sync-test-token"}
+
+    @override_settings(
+        GOOGLE_APPS_SCRIPT_WEBHOOK_URL="https://script.google.com/macros/s/test/exec",
+        GOOGLE_APPS_SCRIPT_WEBHOOK_SECRET="apps-script-test-secret",
+    )
+    def test_apps_script_delivery_upserts_each_eligible_ticket(self):
+        first_ticket = self.make_paid_online_ticket(number=81, quantity=2)
+        ticket_list = list(
+            first_ticket.registration.tickets.order_by("ticket_code")
+        )
+        sync_ids = list(
+            TicketSheetSync.objects.filter(
+                ticket__registration=ticket_list[0].registration
+            ).values_list("id", flat=True)
+        )
+
+        def response_for_request(_url, *, json, timeout):
+            self.assertEqual(timeout, (3.05, 6))
+            self.assertEqual(json["secret"], "apps-script-test-secret")
+            records = json["tickets"]
+            self.assertEqual(len(records), 2)
+            self.assertEqual(
+                {record["sheet_name"] for record in records},
+                {"Online_Tickets"},
+            )
+            self.assertTrue(
+                all(record["row"]["payment_status"] == "VERIFIED" for record in records)
+            )
+            response = Mock()
+            response.json.return_value = {
+                "success": True,
+                "processed_ticket_ids": [
+                    record["row"]["ticket_id"] for record in records
+                ],
+            }
+            return response
+
+        with patch(
+            "apps.payments.apps_script_sync.requests.post",
+            side_effect=response_for_request,
+        ) as post, patch("apps.payments.apps_script_sync.time.sleep"):
+            from apps.payments.apps_script_sync import dispatch_ticket_sheet_syncs
+
+            dispatch_ticket_sheet_syncs(sync_ids)
+
+        self.assertEqual(post.call_count, 1)
+        self.assertEqual(
+            set(
+                TicketSheetSync.objects.filter(pk__in=sync_ids).values_list(
+                    "status", flat=True
+                )
+            ),
+            {TicketSheetSync.Status.SYNCED},
+        )
+        self.assertEqual(
+            set(
+                TicketSheetSync.objects.filter(pk__in=sync_ids).values_list(
+                    "attempt_count", flat=True
+                )
+            ),
+            {0},
+        )
+
+    @override_settings(
+        GOOGLE_APPS_SCRIPT_WEBHOOK_URL="https://script.google.com/macros/s/test/exec",
+        GOOGLE_APPS_SCRIPT_WEBHOOK_SECRET="apps-script-test-secret",
+    )
+    def test_apps_script_timeout_marks_job_failed_without_changing_ticket_payment(self):
+        ticket = self.make_paid_online_ticket(number=82)
+        sync = TicketSheetSync.objects.get(ticket=ticket)
+        payment = Payment.objects.get(intent__registration=ticket.registration)
+
+        with patch(
+            "apps.payments.apps_script_sync.requests.post",
+            side_effect=requests.Timeout("simulated timeout"),
+        ) as post, patch("apps.payments.apps_script_sync.time.sleep"):
+            from apps.payments.apps_script_sync import dispatch_ticket_sheet_syncs
+
+            dispatch_ticket_sheet_syncs([sync.id])
+
+        sync.refresh_from_db()
+        payment.refresh_from_db()
+        ticket.refresh_from_db()
+        self.assertEqual(post.call_count, 3)
+        self.assertEqual(sync.status, TicketSheetSync.Status.FAILED)
+        self.assertEqual(sync.attempt_count, 3)
+        self.assertIn("TIMEOUT", sync.failure_reason)
+        self.assertEqual(payment.status, Payment.Status.VERIFIED)
+        self.assertEqual(ticket.status, Ticket.Status.ISSUED)
+
+    @override_settings(
+        GOOGLE_APPS_SCRIPT_WEBHOOK_URL="",
+        GOOGLE_APPS_SCRIPT_WEBHOOK_SECRET="",
+    )
+    def test_unconfigured_apps_script_keeps_outbox_job_visible_and_pending(self):
+        ticket = self.make_paid_online_ticket(number=83)
+        sync = TicketSheetSync.objects.get(ticket=ticket)
+
+        from apps.payments.apps_script_sync import dispatch_ticket_sheet_syncs
+
+        dispatch_ticket_sheet_syncs([sync.id])
+        sync.refresh_from_db()
+        self.assertEqual(sync.status, TicketSheetSync.Status.PENDING)
+        self.assertEqual(sync.attempt_count, 0)
+        self.assertEqual(sync.failure_reason, "APPS_SCRIPT_NOT_CONFIGURED")
+
+    @override_settings(
+        GOOGLE_APPS_SCRIPT_WEBHOOK_URL="https://script.google.com/macros/s/test/exec",
+        GOOGLE_APPS_SCRIPT_WEBHOOK_SECRET="apps-script-test-secret",
+    )
+    def test_apps_script_application_error_is_failure_even_with_http_success(self):
+        ticket = self.make_paid_online_ticket(number=84)
+        sync = TicketSheetSync.objects.get(ticket=ticket)
+        response = Mock()
+        response.json.return_value = {
+            "success": False,
+            "processed_ticket_ids": [],
+            "error_code": "AUTH_FAILED",
+            "retryable": False,
+        }
+
+        with patch(
+            "apps.payments.apps_script_sync.requests.post",
+            return_value=response,
+        ) as post:
+            from apps.payments.apps_script_sync import dispatch_ticket_sheet_syncs
+
+            dispatch_ticket_sheet_syncs([sync.id])
+
+        sync.refresh_from_db()
+        self.assertEqual(post.call_count, 1)
+        self.assertEqual(sync.status, TicketSheetSync.Status.FAILED)
+        self.assertIn("AUTH_FAILED", sync.failure_reason)
+
+    @override_settings(
+        GOOGLE_APPS_SCRIPT_WEBHOOK_URL="https://script.google.com/macros/s/test/exec",
+        GOOGLE_APPS_SCRIPT_WEBHOOK_SECRET="apps-script-test-secret",
+    )
+    def test_admin_retry_action_dispatches_a_failed_job(self):
+        ticket = self.make_paid_online_ticket(number=85)
+        sync = TicketSheetSync.objects.get(ticket=ticket)
+        sync.status = TicketSheetSync.Status.FAILED
+        sync.failure_reason = "APPS_SCRIPT_SYNC_FAILED (TIMEOUT)"
+        sync.failed_at = timezone.now()
+        sync.save(
+            update_fields=("status", "failure_reason", "failed_at")
+        )
+
+        request = RequestFactory().post("/admin/")
+        SessionMiddleware(lambda _request: None).process_request(request)
+        request.session.save()
+        request._messages = FallbackStorage(request)
+        request.user = self.admin
+        model_admin = admin.site._registry[TicketSheetSync]
+
+        def success_response(_url, *, json, timeout):
+            response = Mock()
+            response.json.return_value = {
+                "success": True,
+                "processed_ticket_ids": [
+                    record["row"]["ticket_id"] for record in json["tickets"]
+                ],
+            }
+            return response
+
+        with patch(
+            "apps.payments.apps_script_sync.requests.post",
+            side_effect=success_response,
+        ):
+            with self.captureOnCommitCallbacks(execute=True):
+                model_admin.retry_failed_syncs(
+                    request,
+                    TicketSheetSync.objects.filter(pk=sync.pk),
+                )
+
+        sync.refresh_from_db()
+        self.assertEqual(sync.status, TicketSheetSync.Status.SYNCED)
 
     def test_online_and_on_spot_ticket_sources_route_without_qr_tokens(self):
         online_ticket = self.make_paid_online_ticket()

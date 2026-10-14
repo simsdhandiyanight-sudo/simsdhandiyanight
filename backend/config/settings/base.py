@@ -224,6 +224,14 @@ GOOGLE_SHEETS_SERVICE_ACCOUNT_JSON = os.environ.get(
     "GOOGLE_SHEETS_SERVICE_ACCOUNT_JSON",
     "",
 ).strip()
+GOOGLE_APPS_SCRIPT_WEBHOOK_URL = os.environ.get(
+    "GOOGLE_APPS_SCRIPT_WEBHOOK_URL",
+    "",
+).strip()
+GOOGLE_APPS_SCRIPT_WEBHOOK_SECRET = os.environ.get(
+    "GOOGLE_APPS_SCRIPT_WEBHOOK_SECRET",
+    "",
+).strip()
 COLLEGE_TICKET_ID_PREFIX = (
     os.environ.get("COLLEGE_TICKET_ID_PREFIX", "").strip() or "SIMS-DN"
 )

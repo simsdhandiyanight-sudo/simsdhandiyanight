@@ -129,6 +129,16 @@ def ensure_ticket_sheet_syncs(registration, tickets=None):
         ],
         ignore_conflicts=True,
     )
+    sync_ids = list(
+        TicketSheetSync.objects.filter(
+            ticket_id__in=[ticket.id for ticket in tickets],
+            status=TicketSheetSync.Status.PENDING,
+        ).values_list("id", flat=True)
+    )
+    if sync_ids:
+        from .apps_script_sync import schedule_ticket_sheet_syncs
+
+        schedule_ticket_sheet_syncs(sync_ids)
 
 
 @transaction.atomic
@@ -177,6 +187,10 @@ def request_ticket_sheet_sync(ticket):
                 "updated_at",
             )
         )
+    if sync.status == TicketSheetSync.Status.PENDING:
+        from .apps_script_sync import schedule_ticket_sheet_syncs
+
+        schedule_ticket_sheet_syncs([sync.id])
 
 
 def sheet_sync_data(sync):

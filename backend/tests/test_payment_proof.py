@@ -5,6 +5,7 @@ from io import StringIO
 from unittest.mock import MagicMock, patch
 
 import cloudinary.exceptions
+import requests
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -430,6 +431,97 @@ class ManualPaymentProofTests(TestCase):
         )
         self.assertEqual(Ticket.objects.count(), 0)
 
+    @override_settings(
+        GOOGLE_APPS_SCRIPT_WEBHOOK_URL="https://script.google.com/macros/s/test/exec",
+        GOOGLE_APPS_SCRIPT_WEBHOOK_SECRET="apps-script-test-secret",
+    )
+    def test_admin_approval_dispatches_multi_ticket_sync_after_commit(self):
+        self.payload["attendee_names"] = ["Buyer One", "Buyer Two"]
+        self.payload["quantity"] = 2
+        registration_result = self.start_registration()
+        submitted = self.submit_proof(registration_result)
+        payment = Payment.objects.get(pk=submitted.data["payment_id"])
+        self.client.force_authenticate(self.admin)
+
+        def success_response(_url, *, json, timeout):
+            self.assertEqual(timeout, (3.05, 6))
+            records = json["tickets"]
+            response = MagicMock()
+            response.json.return_value = {
+                "success": True,
+                "processed_ticket_ids": [
+                    record["row"]["ticket_id"] for record in records
+                ],
+            }
+            return response
+
+        with patch(
+            "apps.payments.apps_script_sync.requests.post",
+            side_effect=success_response,
+        ) as post:
+            with self.captureOnCommitCallbacks(execute=True):
+                approved = self.client.post(
+                    f"/api/v1/payments/proof/{payment.pk}/approve/",
+                    {"confirmed_received": True},
+                    format="json",
+                )
+
+        self.assertEqual(approved.status_code, 200, approved.data)
+        self.assertEqual(post.call_count, 1)
+        payload = post.call_args.kwargs["json"]
+        self.assertEqual(payload["secret"], "apps-script-test-secret")
+        self.assertEqual(len(payload["tickets"]), 2)
+        self.assertTrue(
+            all(
+                record["row"]["payment_status"] == Payment.Status.VERIFIED
+                for record in payload["tickets"]
+            )
+        )
+        self.assertNotIn("token", str(payload).lower())
+        self.assertEqual(
+            TicketSheetSync.objects.filter(
+                ticket__registration_id=registration_result["registration_id"],
+                status=TicketSheetSync.Status.SYNCED,
+            ).count(),
+            2,
+        )
+
+    @override_settings(
+        GOOGLE_APPS_SCRIPT_WEBHOOK_URL="https://script.google.com/macros/s/test/exec",
+        GOOGLE_APPS_SCRIPT_WEBHOOK_SECRET="apps-script-test-secret",
+    )
+    def test_apps_script_unavailable_does_not_undo_admin_payment_approval(self):
+        registration_result = self.start_registration()
+        submitted = self.submit_proof(registration_result)
+        payment = Payment.objects.get(pk=submitted.data["payment_id"])
+        self.client.force_authenticate(self.admin)
+
+        with patch(
+            "apps.payments.apps_script_sync.requests.post",
+            side_effect=requests.Timeout("simulated timeout"),
+        ) as post, patch("apps.payments.apps_script_sync.time.sleep"):
+            with self.captureOnCommitCallbacks(execute=True):
+                approved = self.client.post(
+                    f"/api/v1/payments/proof/{payment.pk}/approve/",
+                    {"confirmed_received": True},
+                    format="json",
+                )
+
+        payment.refresh_from_db()
+        registration = Registration.objects.get(
+            pk=registration_result["registration_id"]
+        )
+        self.assertEqual(approved.status_code, 200, approved.data)
+        self.assertEqual(post.call_count, 3)
+        self.assertEqual(payment.status, Payment.Status.VERIFIED)
+        self.assertEqual(registration.status, Registration.Status.TICKET_ISSUED)
+        self.assertEqual(registration.tickets.count(), 1)
+        self.assertEqual(
+            TicketSheetSync.objects.get(
+                ticket__registration=registration
+            ).status,
+            TicketSheetSync.Status.FAILED,
+        )
 
     def test_admin_approval_checks_confirmation_and_issues_one_final_ticket(self):
         registration_result = self.start_registration()
