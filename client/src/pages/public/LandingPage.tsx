@@ -23,6 +23,7 @@ const eventGuidelines = [
   { title: 'Reporting Time', detail: 'All attendees are requested to arrive and be inside the venue by 5:45 PM.' },
   { title: 'Gate Closure', detail: 'Entry will close strictly at 7:00 PM.' },
   { title: 'Strict Entry Policy', detail: 'No entry will be permitted after the gates close at 7:00 PM, even for ticket holders with valid tickets.' },
+  { title: 'One-Time Entry Policy', detail: 'Entry is permitted only once. Once an attendee exits the venue, re-entry will not be allowed under any circumstances.', highlighted: true },
 ];
 const eventGuidelinesClosing =
   'Arrive on time, step into the festive spirit and get ready for an unforgettable Dhandiya Night!';
@@ -102,8 +103,13 @@ export const LandingPage: React.FC = () => {
         maxWidth="lg"
       >
         <ul className="space-y-3 text-sm leading-relaxed text-slate-200">
-          {eventGuidelines.map(({ title, detail }) => (
-            <li key={title}><strong className="text-amber-300">{title}:</strong> {detail}</li>
+          {eventGuidelines.map(({ title, detail, highlighted }) => (
+            <li
+              key={title}
+              className={highlighted ? 'rounded-lg border border-rose-400/50 bg-rose-950/40 p-3 text-rose-100 font-semibold' : ''}
+            >
+              <strong className={highlighted ? 'text-rose-300' : 'text-amber-300'}>{title}:</strong> {detail}
+            </li>
           ))}
         </ul>
         <p className="mt-4 text-sm leading-relaxed text-slate-300">
@@ -171,9 +177,12 @@ export const LandingPage: React.FC = () => {
               Important Event Guidelines – Dhandiya Night
             </h2>
             <ul className="mt-4 grid gap-3 text-sm leading-relaxed text-slate-800 md:grid-cols-2">
-              {eventGuidelines.map(({ title, detail }) => (
-                <li key={title}>
-                  <strong className="text-amber-800">{title}:</strong> {detail}
+              {eventGuidelines.map(({ title, detail, highlighted }) => (
+                <li
+                  key={title}
+                  className={highlighted ? 'md:col-span-2 rounded-xl border border-rose-500/40 bg-rose-100 px-4 py-3 text-rose-950 font-semibold shadow-sm' : ''}
+                >
+                  <strong className={highlighted ? 'text-rose-800' : 'text-amber-800'}>{title}:</strong> {detail}
                 </li>
               ))}
             </ul>
