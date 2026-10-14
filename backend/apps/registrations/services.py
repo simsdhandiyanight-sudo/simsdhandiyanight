@@ -1,10 +1,12 @@
 import hashlib
 import json
+import logging
+import uuid
 
 from django.conf import settings
 from django.db import IntegrityError, transaction
 from rest_framework.exceptions import APIException, ValidationError
-from django.db.models import Q, Sum
+from django.db.models import F, Q, Sum
 from django.utils import timezone
 
 from apps.events.models import Event, TicketTier
@@ -14,6 +16,8 @@ from .models import (
     Registration,
     RegistrationIdempotency,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class RegistrationConflict(APIException):
@@ -37,7 +41,9 @@ def create_registration(
     source,
     created_by=None,
     attendee_names=None,
+    quantity=1,
     exclude_payment_intent_id=None,
+    payment_confirmation=None,
 ):
     try:
         event = Event.objects.select_for_update().get(pk=event_id)
@@ -56,13 +62,24 @@ def create_registration(
         raise RegistrationConflict("The selected ticket offer is unavailable.")
 
     names = attendee_names or [buyer["name"]]
-    if len(names) != tier.admission_count:
+    admission_quantity = quantity * tier.admission_count
+    if len(names) != admission_quantity:
         raise ValidationError({
-            "attendee_names": f"Enter a name for each of the {tier.admission_count} attendees."
+            "attendee_names": f"Enter a name for each of the {admission_quantity} attendees."
         })
     names = [name.strip() for name in names]
     if any(not name for name in names):
         raise ValidationError({"attendee_names": "Every attendee name is required."})
+    if source == Registration.Source.ON_SPOT and not (
+        payment_confirmation and payment_confirmation.get("payment_received")
+    ):
+        raise ValidationError(
+            {
+                "payment_confirmation": (
+                    "An authorized operator must confirm receipt of payment."
+                )
+            }
+        )
 
     active_count = Ticket.objects.filter(registration__event=event).exclude(
         status=Ticket.Status.CANCELLED
@@ -82,9 +99,9 @@ def create_registration(
     if exclude_payment_intent_id is not None:
         reservations = reservations.exclude(pk=exclude_payment_intent_id)
     reserved_count = reservations.aggregate(
-        total=Sum("ticket_tier__admission_count")
+        total=Sum(F("ticket_tier__admission_count") * F("quantity"))
     )["total"] or 0
-    if active_count + reserved_count + tier.admission_count > event.capacity:
+    if active_count + reserved_count + admission_quantity > event.capacity:
         raise RegistrationConflict("Not enough event capacity remains for this ticket offer.")
 
     existing_reservations = InventoryReservation.objects.filter(
@@ -94,7 +111,7 @@ def create_registration(
     reserved_inventory = existing_reservations.aggregate(
         total=Sum("units_reserved")
     )["total"] or 0
-    if active_count + reserved_count + reserved_inventory + tier.admission_count > event.capacity:
+    if active_count + reserved_count + reserved_inventory + admission_quantity > event.capacity:
         raise RegistrationConflict("Not enough event capacity remains for this ticket offer.")
 
     registration = Registration.objects.create(
@@ -106,13 +123,115 @@ def create_registration(
         buyer_organization=buyer.get("organization", "").strip(),
         buyer_job_title=buyer.get("job_title", "").strip(),
         source=source,
-        status=Registration.Status.TICKET_ISSUED,
+        status=(
+            Registration.Status.PAYMENT_VERIFIED
+            if source == Registration.Source.ON_SPOT
+            else Registration.Status.TICKET_ISSUED
+        ),
         created_by=created_by,
     )
-    tickets = issue_registration_tickets(
-        registration=registration,
-        attendee_names=names,
-    )
+    on_spot_payment = None
+    if source == Registration.Source.ON_SPOT:
+        from apps.audit.models import AuditLog
+        from apps.payments.models import Payment, PaymentIntent
+
+        now = timezone.now()
+        intent = PaymentIntent.objects.create(
+            idempotency_key=uuid.uuid4(),
+            request_hash=registration_request_hash(
+                event_id=event.id,
+                tier_id=tier.id,
+                buyer=buyer,
+                source=source,
+                attendee_names=names,
+                quantity=quantity,
+                payment_confirmation=payment_confirmation,
+            ),
+            event=event,
+            ticket_tier=tier,
+            buyer_name=registration.buyer_name,
+            buyer_email=registration.buyer_email,
+            buyer_phone=registration.buyer_phone,
+            buyer_organization=registration.buyer_organization,
+            buyer_job_title=registration.buyer_job_title,
+            attendee_names=names,
+            quantity=quantity,
+            status=PaymentIntent.Status.VERIFIED,
+            registration=registration,
+        )
+        on_spot_payment = Payment.objects.create(
+            intent=intent,
+            provider=Payment.Provider.ON_SPOT,
+            provider_status="OPERATOR_CONFIRMED",
+            payment_method=payment_confirmation["payment_method"],
+            amount=int(tier.price * quantity * 100),
+            currency=tier.currency,
+            status=Payment.Status.VERIFIED,
+            verification_status=Payment.VerificationStatus.VERIFIED,
+            ticket_issuance_status=Payment.TicketIssuanceStatus.PENDING,
+            submitted_at=now,
+            verified_at=now,
+            verified_by=created_by,
+        )
+        AuditLog.objects.create(
+            actor=created_by,
+            action="ON_SPOT_PAYMENT_VERIFIED",
+            resource_type="payment",
+            resource_id=str(on_spot_payment.id),
+            metadata={
+                "registration_id": str(registration.id),
+                "payment_method": payment_confirmation["payment_method"],
+            },
+        )
+    try:
+        with transaction.atomic():
+            tickets = issue_registration_tickets(
+                registration=registration,
+                attendee_names=names,
+                quantity=quantity,
+            )
+            if on_spot_payment is not None:
+                registration.status = Registration.Status.TICKET_ISSUED
+                registration.save(update_fields=("status", "updated_at"))
+                on_spot_payment.ticket_issuance_status = (
+                    Payment.TicketIssuanceStatus.ISSUED
+                )
+                on_spot_payment.save(
+                    update_fields=("ticket_issuance_status", "updated_at")
+                )
+                from apps.payments.sheets import ensure_ticket_sheet_syncs
+
+                ensure_ticket_sheet_syncs(registration, tickets)
+    except Exception as error:
+        if on_spot_payment is None:
+            raise
+        logger.exception(
+            "On-spot ticket issuance failed for registration %s.",
+            registration.id,
+        )
+        registration.status = Registration.Status.PAYMENT_VERIFIED
+        registration.save(update_fields=("status", "updated_at"))
+        on_spot_payment.ticket_issuance_status = (
+            Payment.TicketIssuanceStatus.ADMIN_REVIEW_REQUIRED
+        )
+        on_spot_payment.ticket_issuance_failure = (
+            f"{type(error).__name__}: {error}"
+        )[:1000]
+        on_spot_payment.save(
+            update_fields=(
+                "ticket_issuance_status",
+                "ticket_issuance_failure",
+                "updated_at",
+            )
+        )
+        AuditLog.objects.create(
+            actor=created_by,
+            action="ON_SPOT_TICKET_ISSUANCE_FAILED",
+            resource_type="payment",
+            resource_id=str(on_spot_payment.id),
+            metadata={"registration_id": str(registration.id)},
+        )
+        tickets = []
     from apps.audit.models import AuditLog
 
     AuditLog.objects.create(
@@ -125,22 +244,23 @@ def create_registration(
     return registration, tickets
 
 
-def issue_registration_tickets(*, registration, attendee_names):
+def issue_registration_tickets(*, registration, attendee_names, quantity=1):
+    expected_admissions = quantity * registration.ticket_tier.admission_count
     existing_tickets = list(registration.tickets.order_by("ticket_code"))
     if existing_tickets:
-        if len(existing_tickets) != registration.ticket_tier.admission_count:
+        if len(existing_tickets) != expected_admissions:
             raise RegistrationConflict(
                 "Existing admission tickets do not match the reserved ticket quantity."
             )
         return existing_tickets
 
     names = [name.strip() for name in attendee_names]
-    if len(names) != registration.ticket_tier.admission_count or any(not name for name in names):
+    if len(names) != expected_admissions or any(not name for name in names):
         raise ValidationError(
             {
                 "attendee_names": (
                     f"Enter a name for each of the "
-                    f"{registration.ticket_tier.admission_count} attendees."
+                    f"{expected_admissions} attendees."
                 )
             }
         )
@@ -154,10 +274,82 @@ def issue_registration_tickets(*, registration, attendee_names):
     ]
     Ticket.objects.bulk_create(tickets)
     tickets = list(registration.tickets.order_by("ticket_code"))
-    from apps.payments.delivery import ensure_ticket_deliveries
+    from apps.payments.sheets import ensure_ticket_sheet_syncs
 
-    ensure_ticket_deliveries(registration, tickets)
+    ensure_ticket_sheet_syncs(registration, tickets)
     return tickets
+
+
+@transaction.atomic
+def retry_on_spot_ticket_issuance(*, payment_id, administrator):
+    from apps.audit.models import AuditLog
+    from apps.payments.sheets import ensure_ticket_sheet_syncs
+    from apps.payments.models import Payment
+
+    payment = (
+        Payment.objects.select_for_update()
+        .select_related(
+            "intent__registration",
+            "intent__registration__event",
+            "intent__registration__ticket_tier",
+        )
+        .get(pk=payment_id)
+    )
+    registration = payment.intent.registration
+    if payment.provider != Payment.Provider.ON_SPOT:
+        raise RegistrationConflict("Only on-spot payment issuance can be retried here.")
+    if (
+        payment.ticket_issuance_status == Payment.TicketIssuanceStatus.ISSUED
+        and registration.status == Registration.Status.TICKET_ISSUED
+    ):
+        return list(registration.tickets.all()), True
+    if (
+        payment.status != Payment.Status.VERIFIED
+        or payment.verification_status != Payment.VerificationStatus.VERIFIED
+        or payment.verified_by_id is None
+        or payment.verified_at is None
+        or payment.ticket_issuance_status
+        != Payment.TicketIssuanceStatus.ADMIN_REVIEW_REQUIRED
+        or registration.status != Registration.Status.PAYMENT_VERIFIED
+    ):
+        raise RegistrationConflict(
+            "The on-spot payment is not eligible for ticket issuance retry."
+        )
+    with transaction.atomic():
+        tickets = issue_registration_tickets(
+            registration=registration,
+            attendee_names=payment.intent.attendee_names,
+            quantity=payment.intent.quantity,
+        )
+        if len(tickets) != (
+            payment.intent.quantity * registration.ticket_tier.admission_count
+        ):
+            raise RegistrationConflict(
+                "The issued ticket count does not match the verified order."
+            )
+        registration.status = Registration.Status.TICKET_ISSUED
+        registration.save(update_fields=("status", "updated_at"))
+        payment.ticket_issuance_status = Payment.TicketIssuanceStatus.ISSUED
+        payment.ticket_issuance_failure = ""
+        payment.save(
+            update_fields=(
+                "ticket_issuance_status",
+                "ticket_issuance_failure",
+                "updated_at",
+            )
+        )
+        ensure_ticket_sheet_syncs(registration, tickets)
+        AuditLog.objects.create(
+            actor=administrator,
+            action="ON_SPOT_TICKETS_ISSUED",
+            resource_type="payment",
+            resource_id=str(payment.id),
+            metadata={
+                "registration_id": str(registration.id),
+                "ticket_ids": [str(ticket.id) for ticket in tickets],
+            },
+        )
+    return tickets, False
 
 
 def registration_request_hash(
@@ -167,6 +359,8 @@ def registration_request_hash(
     buyer,
     source,
     attendee_names=None,
+    quantity=1,
+    payment_confirmation=None,
 ):
     payload = {
         "event_id": str(event_id),
@@ -181,6 +375,13 @@ def registration_request_hash(
         "source": source,
         "attendee_names": [name.strip() for name in attendee_names or [buyer["name"]]],
     }
+    if quantity != 1:
+        payload["quantity"] = quantity
+    if payment_confirmation is not None:
+        payload["payment_confirmation"] = {
+            "payment_received": payment_confirmation["payment_received"],
+            "payment_method": payment_confirmation["payment_method"],
+        }
     serialized = json.dumps(
         payload,
         sort_keys=True,
@@ -200,6 +401,8 @@ def create_registration_idempotently(
     source,
     created_by=None,
     attendee_names=None,
+    quantity=1,
+    payment_confirmation=None,
 ):
     from .models import RegistrationIdempotency
 
@@ -209,6 +412,8 @@ def create_registration_idempotently(
         buyer=buyer,
         source=source,
         attendee_names=attendee_names,
+        quantity=quantity,
+        payment_confirmation=payment_confirmation,
     )
     try:
         with transaction.atomic():
@@ -237,6 +442,8 @@ def create_registration_idempotently(
         source=source,
         created_by=created_by,
         attendee_names=attendee_names,
+        quantity=quantity,
+        payment_confirmation=payment_confirmation,
     )
     idempotency.registration = registration
     idempotency.save(update_fields=("registration",))
@@ -251,6 +458,7 @@ def create_reserved_registration(
     tier_id,
     buyer,
     attendee_names,
+    quantity=1,
 ):
     from datetime import timedelta
 
@@ -263,6 +471,7 @@ def create_reserved_registration(
         buyer=buyer,
         source=Registration.Source.ONLINE,
         attendee_names=attendee_names,
+        quantity=quantity,
     )
     try:
         with transaction.atomic():
@@ -305,11 +514,12 @@ def create_reserved_registration(
         raise RegistrationConflict("The selected ticket offer is unavailable.")
 
     names = [name.strip() for name in attendee_names]
-    if len(names) != tier.admission_count or any(not name for name in names):
+    admission_quantity = quantity * tier.admission_count
+    if len(names) != admission_quantity or any(not name for name in names):
         raise ValidationError(
             {
                 "attendee_names": (
-                    f"Enter a name for each of the {tier.admission_count} attendees."
+                    f"Enter a name for each of the {admission_quantity} attendees."
                 )
             }
         )
@@ -337,9 +547,9 @@ def create_reserved_registration(
         | Q(status=PaymentIntent.Status.PENDING, expires_at__gt=now)
     )
     legacy_units = legacy_reservations.aggregate(
-        total=Sum("ticket_tier__admission_count")
+        total=Sum(F("ticket_tier__admission_count") * F("quantity"))
     )["total"] or 0
-    if active_count + reserved_units + legacy_units + tier.admission_count > event.capacity:
+    if active_count + reserved_units + legacy_units + admission_quantity > event.capacity:
         raise RegistrationConflict(
             "Not enough event capacity remains for this ticket offer."
         )
@@ -358,7 +568,7 @@ def create_reserved_registration(
     InventoryReservation.objects.create(
         registration=registration,
         event=event,
-        units_reserved=tier.admission_count,
+        units_reserved=admission_quantity,
         expires_at=reservation_expiry,
     )
     intent = PaymentIntent.objects.create(
@@ -372,6 +582,7 @@ def create_reserved_registration(
         buyer_organization=registration.buyer_organization,
         buyer_job_title=registration.buyer_job_title,
         attendee_names=names,
+        quantity=quantity,
         status=PaymentIntent.Status.PENDING,
         registration=registration,
         expires_at=reservation_expiry,

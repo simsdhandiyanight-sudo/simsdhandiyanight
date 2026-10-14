@@ -112,7 +112,7 @@ export const AdminDashboardPage: React.FC = () => {
           />
 
           <StatCard
-            label="On-Spot Kiosk"
+            label="Historical On-Spot Tickets"
             value={onSpotCount}
             subValue="Walk-in venue registrations"
             icon={<TrendingUp className="w-4 h-4 text-emerald-400" />}
@@ -169,7 +169,7 @@ export const AdminDashboardPage: React.FC = () => {
               <h3 className="text-sm font-bold text-white uppercase tracking-wider font-display">
                 Channel Distribution
               </h3>
-              <p className="text-xs text-slate-400">Online pre-registration vs on-spot desk.</p>
+              <p className="text-xs text-slate-400">Online pre-registration and historical on-spot sales.</p>
             </div>
 
             {/* Proportion bars */}
@@ -220,12 +220,6 @@ export const AdminDashboardPage: React.FC = () => {
               </div>
             </div>
 
-            <Link
-              to="/admin/scans"
-              className="w-full py-2.5 text-center text-xs font-semibold text-indigo-400 hover:text-white bg-slate-950 border border-slate-800 rounded-xl transition-colors block"
-            >
-              Review Scan History &rarr;
-            </Link>
           </div>
         </div>
 
@@ -240,12 +234,6 @@ export const AdminDashboardPage: React.FC = () => {
                 Most recent scan records from the event database.
               </p>
             </div>
-            <Link
-              to="/admin/scans"
-              className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold"
-            >
-              View Full Monitor &rarr;
-            </Link>
           </div>
 
           <div className="overflow-x-auto">

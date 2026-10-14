@@ -22,7 +22,7 @@ export const StaffLoginPage: React.FC = () => {
       const defaultPath = user.role === 'ADMIN'
         ? '/admin'
         : user.role === 'REGISTRATION'
-          ? '/staff/register'
+          ? '/admin/registrations'
           : '/staff/scanner';
       navigate(requestedPath || defaultPath, { replace: true });
     } catch (error) {

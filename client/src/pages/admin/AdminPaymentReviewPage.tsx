@@ -6,6 +6,7 @@ import {
   type PaymentReviewDashboard,
 } from '../../api/paymentReview';
 import { AdminLayout } from '../../components/admin/AdminLayout';
+import { Modal } from '../../components/common/Modal';
 
 const count = (value: number | undefined) => (value ?? 0).toLocaleString();
 
@@ -17,6 +18,9 @@ export default function AdminPaymentReviewPage() {
   const [loading, setLoading] = useState(true);
   const [reconciling, setReconciling] = useState<string | null>(null);
   const [processingProof, setProcessingProof] = useState<string | null>(null);
+  const [proofToReject, setProofToReject] = useState<ManualPaymentProof | null>(null);
+  const [rejectionReason, setRejectionReason] = useState('');
+  const [rejectionError, setRejectionError] = useState('');
   const [loadingScreenshot, setLoadingScreenshot] = useState<string | null>(null);
   const [activeScreenshot, setActiveScreenshot] = useState<{
     applicantName: string;
@@ -85,33 +89,34 @@ export default function AdminPaymentReviewPage() {
     }
   };
 
-  const rejectProof = async (proof: ManualPaymentProof) => {
-    const reason = window.prompt('Enter the reason for rejecting this payment proof:');
-    if (reason === null) return;
-    if (!reason.trim()) {
-      setProofError('A rejection reason is required.');
+  const openRejectDialog = (proof: ManualPaymentProof) => {
+    setRejectionReason('');
+    setRejectionError('');
+    setProofToReject(proof);
+  };
+
+  const rejectProof = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const proof = proofToReject;
+    const reason = rejectionReason.trim();
+    if (!proof) return;
+    if (!reason) {
+      setRejectionError('A rejection reason is required.');
       return;
     }
     setProcessingProof(proof.payment_id);
-    setProofError('');
+    setRejectionError('');
     try {
-      await paymentReviewApi.rejectProof(proof.payment_id, reason.trim());
+      await paymentReviewApi.rejectProof(proof.payment_id, reason);
+      setProofToReject(null);
+      setRejectionReason('');
       await loadProofs();
     } catch (actionError) {
-      setProofError(actionError instanceof Error ? actionError.message : 'Unable to reject this payment proof.');
-    } finally {
-      setProcessingProof(null);
-    }
-  };
-
-  const retryRejectionEmail = async (proof: ManualPaymentProof) => {
-    setProcessingProof(proof.payment_id);
-    setProofError('');
-    try {
-      await paymentReviewApi.retryProofRejectionEmail(proof.payment_id);
-      await loadProofs();
-    } catch (actionError) {
-      setProofError(actionError instanceof Error ? actionError.message : 'Unable to retry the rejection email.');
+      setRejectionError(
+        actionError instanceof Error
+          ? actionError.message
+          : 'Unable to reject this payment proof.',
+      );
     } finally {
       setProcessingProof(null);
     }
@@ -243,11 +248,6 @@ export default function AdminPaymentReviewPage() {
                         {proof.rejection_reason && (
                           <p className="mt-1 max-w-xs text-[10px] text-rose-200">{proof.rejection_reason}</p>
                         )}
-                        {proof.rejection_email_status && (
-                          <p className="mt-1 text-[10px] text-slate-400">
-                            Rejection email: {proof.rejection_email_status}
-                          </p>
-                        )}
                       </td>
                       <td className="space-y-2 px-4 py-4">
                         {proof.payment_status === 'PENDING_VERIFICATION' && (
@@ -263,26 +263,15 @@ export default function AdminPaymentReviewPage() {
                             </button>
                             <button
                               type="button"
-                              onClick={() => void rejectProof(proof)}
+                              onClick={() => openRejectDialog(proof)}
                               disabled={processingProof !== null}
-                              className="inline-flex items-center gap-1.5 rounded-lg bg-rose-900 px-3 py-2 text-xs font-semibold text-white hover:bg-rose-800 disabled:opacity-50"
+                              className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg bg-rose-900 px-3 py-2 text-xs font-semibold text-white hover:bg-rose-800 disabled:cursor-not-allowed disabled:opacity-50"
                             >
                               <XCircle className="h-3.5 w-3.5" />
                               Reject
                             </button>
                           </>
                         )}
-                        {proof.payment_status === 'REJECTED'
-                          && proof.rejection_email_status === 'FAILED' && (
-                            <button
-                              type="button"
-                              onClick={() => void retryRejectionEmail(proof)}
-                              disabled={processingProof !== null}
-                              className="rounded-lg border border-amber-700 px-3 py-2 text-xs text-amber-200 hover:bg-amber-950 disabled:opacity-50"
-                            >
-                              Retry rejection email
-                            </button>
-                          )}
                       </td>
                     </tr>
                   ))}
@@ -429,6 +418,60 @@ export default function AdminPaymentReviewPage() {
             <p className="p-6 text-sm text-slate-400">No online ticket records without a verified payment are currently reported.</p>
           )}
         </section>
+        <Modal
+          isOpen={proofToReject !== null}
+          onClose={() => {
+            if (processingProof === null) {
+              setProofToReject(null);
+              setRejectionError('');
+            }
+          }}
+          title="Reject payment proof"
+          description={
+            proofToReject
+              ? `Enter the reason for rejecting ${proofToReject.applicant_name}'s payment proof.`
+              : undefined
+          }
+        >
+          <form onSubmit={(event) => void rejectProof(event)} className="space-y-4">
+            <label className="block space-y-2 text-xs text-slate-300">
+              <span>Rejection reason</span>
+              <textarea
+                autoFocus
+                required
+                maxLength={1000}
+                rows={4}
+                value={rejectionReason}
+                onChange={(event) => setRejectionReason(event.target.value)}
+                disabled={processingProof !== null}
+                className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-rose-500 disabled:opacity-60"
+                placeholder="Explain why this payment proof is being rejected."
+              />
+            </label>
+            {rejectionError && (
+              <p role="alert" className="rounded-lg border border-rose-900/70 bg-rose-950/40 p-3 text-xs text-rose-200">
+                {rejectionError}
+              </p>
+            )}
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setProofToReject(null)}
+                disabled={processingProof !== null}
+                className="cursor-pointer rounded-lg border border-slate-700 px-4 py-2 text-xs text-slate-200 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={processingProof !== null || !rejectionReason.trim()}
+                className="cursor-pointer rounded-lg bg-rose-800 px-4 py-2 text-xs font-semibold text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {processingProof === proofToReject?.payment_id ? 'Rejecting…' : 'Confirm rejection'}
+              </button>
+            </div>
+          </form>
+        </Modal>
         {activeScreenshot && (
           <div
             role="dialog"

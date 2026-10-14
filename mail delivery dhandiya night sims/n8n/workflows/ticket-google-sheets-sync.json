@@ -1,0 +1,97 @@
+{
+  "name": "Ticket Google Sheets Sync",
+  "active": false,
+  "nodes": [
+    {
+      "name": "Fetch Pending Sheet Jobs",
+      "parameters": {"method": "GET", "url": "={{$env.DJANGO_API_BASE_URL}}/api/internal/sheet-jobs/pending"}
+    },
+    {
+      "name": "Fetch Ticket Sheet Data",
+      "parameters": {"method": "GET", "url": "={{$env.DJANGO_API_BASE_URL}}/api/internal/sheet-jobs/{{$json.job_id}}/data?attempt={{$json.attempt}}"}
+    },
+    {
+      "name": "Ensure Sheet Headers",
+      "parameters": {
+        "operation": "createHeadersIfWorksheetEmpty",
+        "spreadsheetId": "={{$env.GOOGLE_SHEETS_SPREADSHEET_ID}}",
+        "sheetName": "={{$json.sheet_name}}",
+        "headers": [
+          "ticket_id",
+          "ticket_number",
+          "registration_id",
+          "ticket_type",
+          "name",
+          "email",
+          "phone",
+          "amount_due",
+          "payment_method",
+          "upi_id",
+          "transaction_id_utr",
+          "payment_status",
+          "verified_by",
+          "verified_at",
+          "ticket_status",
+          "ticket_generated_at",
+          "email_status",
+          "email_sent_at",
+          "scan_status",
+          "checked_in_at",
+          "checked_in_by",
+          "created_at",
+          "updated_at",
+          "last_synced_at"
+        ]
+      }
+    },
+    {
+      "name": "Upsert Ticket Row",
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {"value": "={{$env.GOOGLE_SHEETS_SPREADSHEET_ID}}"},
+        "sheetName": {"value": "{{$json.sheet_name}}"},
+        "columns": {
+          "matchingColumns": ["ticket_id"],
+          "value": [
+            "ticket_id",
+            "ticket_number",
+            "registration_id",
+            "ticket_type",
+            "name",
+            "email",
+            "phone",
+            "amount_due",
+            "payment_method",
+            "upi_id",
+            "transaction_id_utr",
+            "payment_status",
+            "verified_by",
+            "verified_at",
+            "ticket_status",
+            "ticket_generated_at",
+            "email_status",
+            "email_sent_at",
+            "scan_status",
+            "checked_in_at",
+            "checked_in_by",
+            "created_at",
+            "updated_at",
+            "last_synced_at"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Mark Sheet Job Synced",
+      "parameters": {"method": "POST", "url": "={{$env.DJANGO_API_BASE_URL}}/api/internal/sheet-jobs/{{$json.job_id}}/synced"}
+    },
+    {
+      "name": "Report Sheet Upsert Failure",
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.DJANGO_API_BASE_URL}}/api/internal/sheet-jobs/{{$json.job_id}}/failed",
+        "jsonBody": "{\"attempt\": {{$json.attempt}}, \"error_code\": \"GOOGLE_SHEETS_UPSERT_FAILED\"}"
+      }
+    }
+  ]
+}

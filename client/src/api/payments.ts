@@ -134,4 +134,7 @@ export const paymentsApi = {
 
   proofConfirmationUrl: (registrationId: string) =>
     `/payments/proof/registrations/${encodeURIComponent(registrationId)}/ticket-id.pdf`,
+
+  proofTicketsUrl: (registrationId: string) =>
+    `/payments/proof/registrations/${encodeURIComponent(registrationId)}/tickets.pdf`,
 };

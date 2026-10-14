@@ -97,9 +97,4 @@ export const paymentReviewApi = {
       method: 'POST',
       body: JSON.stringify({ reason }),
     }),
-  retryProofRejectionEmail: (paymentId: string) =>
-    apiRequest<unknown>(
-      `/payments/proof/${encodeURIComponent(paymentId)}/retry-rejection-email/`,
-      { method: 'POST' },
-    ),
 };

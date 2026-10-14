@@ -1,15 +1,14 @@
 from django.urls import path
 
 from .views import (
-    BrevoWebhookView,
     PaymentProofApproveView,
     PaymentProofConfirmationView,
     PaymentProofDashboardView,
     PaymentProofRegistrationView,
-    PaymentProofRejectionEmailRetryView,
     PaymentProofRejectView,
     PaymentProofScreenshotView,
     PaymentProofStatusView,
+    PaymentProofTicketsPdfView,
     PaymentProofSubmissionView,
     PayUCallbackView,
     PayUPaymentStatusView,
@@ -17,9 +16,6 @@ from .views import (
     PayUCreatePaymentView,
     PaymentReviewDashboardView,
     PaymentReconcileView,
-    TicketDeliveryDashboardView,
-    TicketDeliveryPriorityView,
-    TicketDeliveryRetryView,
 )
 
 urlpatterns = [
@@ -44,6 +40,11 @@ urlpatterns = [
         name="payment-proof-ticket-id",
     ),
     path(
+        "payments/proof/registrations/<uuid:registration_id>/tickets.pdf",
+        PaymentProofTicketsPdfView.as_view(),
+        name="payment-proof-issued-tickets",
+    ),
+    path(
         "payments/proof/dashboard/",
         PaymentProofDashboardView.as_view(),
         name="payment-proof-dashboard",
@@ -63,11 +64,6 @@ urlpatterns = [
         PaymentProofRejectView.as_view(),
         name="payment-proof-reject",
     ),
-    path(
-        "payments/proof/<uuid:payment_id>/retry-rejection-email/",
-        PaymentProofRejectionEmailRetryView.as_view(),
-        name="payment-proof-rejection-email-retry",
-    ),
     path("payments/create-order/", PayUCreatePaymentView.as_view(), name="payu-create-payment"),
     path("payments/payu/success/", PayUCallbackView.as_view(), name="payu-success-callback"),
     path("payments/payu/failure/", PayUCallbackView.as_view(), name="payu-failure-callback"),
@@ -83,20 +79,4 @@ urlpatterns = [
         PaymentReconcileView.as_view(),
         name="payment-reconcile",
     ),
-    path(
-        "payments/delivery/dashboard/",
-        TicketDeliveryDashboardView.as_view(),
-        name="ticket-delivery-dashboard",
-    ),
-    path(
-        "payments/delivery/<uuid:delivery_id>/retry/",
-        TicketDeliveryRetryView.as_view(),
-        name="ticket-delivery-retry",
-    ),
-    path(
-        "payments/delivery/<uuid:delivery_id>/priority/",
-        TicketDeliveryPriorityView.as_view(),
-        name="ticket-delivery-priority",
-    ),
-    path("payments/brevo/webhook/", BrevoWebhookView.as_view(), name="brevo-webhook"),
 ]

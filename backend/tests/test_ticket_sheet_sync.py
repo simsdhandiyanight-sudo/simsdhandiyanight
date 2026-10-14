@@ -1,0 +1,478 @@
+import uuid
+from datetime import timedelta
+
+from django.contrib.auth import get_user_model
+from django.test import TestCase, override_settings
+from django.utils import timezone
+from rest_framework.test import APIClient
+
+from apps.events.models import Event, TicketTier
+from apps.payments.sheets import ensure_ticket_sheet_syncs
+from apps.payments.models import Payment, PaymentIntent, TicketDelivery, TicketSheetSync
+from apps.payments.sheets import (
+    SHEET_HEADERS,
+    backfill_ticket_sheet_syncs,
+    ensure_ticket_sheet_syncs,
+    sheet_sync_data,
+)
+from apps.registrations.models import Registration
+from apps.registrations.services import create_registration
+from apps.scanning.models import Gate, StaffAssignment, TicketScan
+from apps.scanning.services import scan_ticket
+from apps.tickets.services import cancel_ticket
+from apps.tickets.college_services import create_college_student_ticket
+from apps.tickets.models import CollegeStudentTicket
+
+
+@override_settings(
+    DJANGO_INTERNAL_API_KEY="sheet-sync-test-token",
+    N8N_SHEET_SYNC_JOB_LEASE_MINUTES=10,
+)
+class TicketSheetSyncTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        start = timezone.now() + timedelta(days=2)
+        self.event = Event.objects.create(
+            slug="sheet-sync-event",
+            name="Sheet Sync Event",
+            start_at=start,
+            end_at=start + timedelta(hours=3),
+            venue="Test Venue",
+            city="Bengaluru",
+            address="Test Address",
+            status=Event.Status.OPEN,
+            registration_open=True,
+            capacity=100,
+        )
+        self.tier = TicketTier.objects.create(
+            event=self.event,
+            slug="single",
+            name="Single Ticket",
+            price="149.00",
+        )
+        self.admin = get_user_model().objects.create_user(
+            "sheet-admin@example.test",
+            "Secure-test-pass-123!",
+            name="Sheet Admin",
+            role="ADMIN",
+        )
+        self.gate = Gate.objects.create(event=self.event, name="Sheet Sync Gate")
+        StaffAssignment.objects.create(user=self.admin, gate=self.gate)
+
+    def make_registration(self, *, source, email, number):
+        registration, tickets = create_registration(
+            event_id=self.event.id,
+            tier_id=self.tier.id,
+            buyer={
+                "name": f"Sheet Buyer {number}",
+                "email": email,
+                "phone": "+919876543210",
+            },
+            source=source,
+            created_by=self.admin if source == Registration.Source.ON_SPOT else None,
+            attendee_names=[f"Sheet Attendee {number}"],
+            payment_confirmation=(
+                {"payment_received": True, "payment_method": "CASH"}
+                if source == Registration.Source.ON_SPOT
+                else None
+            ),
+        )
+        return registration, tickets
+
+    def make_paid_online_ticket(self):
+        registration, tickets = self.make_registration(
+            source=Registration.Source.ONLINE,
+            email="online-sheet@example.test",
+            number=1,
+        )
+        intent = PaymentIntent.objects.create(
+            idempotency_key=uuid.uuid4(),
+            request_hash="sheet-sync-online",
+            event=self.event,
+            ticket_tier=self.tier,
+            buyer_name=registration.buyer_name,
+            buyer_email=registration.buyer_email,
+            buyer_phone=registration.buyer_phone,
+            attendee_names=[tickets[0].attendee_name],
+            status=PaymentIntent.Status.VERIFIED,
+            registration=registration,
+        )
+        Payment.objects.create(
+            intent=intent,
+            provider=Payment.Provider.UPI_MANUAL,
+            amount=14900,
+            currency="INR",
+            status=Payment.Status.VERIFIED,
+            verification_status=Payment.VerificationStatus.VERIFIED,
+            ticket_issuance_status=Payment.TicketIssuanceStatus.ISSUED,
+            verified_at=timezone.now(),
+            verified_by=self.admin,
+        )
+        registration.status = Registration.Status.TICKET_ISSUED
+        registration.save(update_fields=("status", "updated_at"))
+        ensure_ticket_sheet_syncs(registration, tickets)
+        return tickets[0]
+
+    def auth_headers(self):
+        return {"HTTP_AUTHORIZATION": "Token sheet-sync-test-token"}
+
+    def test_online_and_on_spot_ticket_sources_route_without_qr_tokens(self):
+        online_ticket = self.make_paid_online_ticket()
+        _, on_spot_tickets = self.make_registration(
+            source=Registration.Source.ON_SPOT,
+            email="onsite-sheet@example.test",
+            number=2,
+        )
+        student_ticket = create_college_student_ticket(
+            event=self.event,
+            student_name="Student Name",
+            student_email="student-sheet@example.test",
+            created_by=self.admin,
+        )
+
+        self.assertEqual(TicketSheetSync.objects.count(), 2)
+        self.assertFalse(
+            TicketSheetSync.objects.filter(college_ticket=student_ticket).exists()
+        )
+        pending = self.client.get(
+            "/api/internal/sheet-jobs/pending",
+            **self.auth_headers(),
+        )
+        self.assertEqual(pending.status_code, 200, pending.data)
+        self.assertEqual(pending.data["count"], 2)
+
+        sheets = {}
+        rows = {}
+        for job in pending.data["jobs"]:
+            data = self.client.get(
+                f"/api/internal/sheet-jobs/{job['job_id']}/data",
+                {"attempt": job["attempt"]},
+                **self.auth_headers(),
+            )
+            self.assertEqual(data.status_code, 200, data.data)
+            self.assertNotIn("token", data.data)
+            self.assertNotIn("qr", str(data.data).lower())
+            self.assertEqual(data.data["headers"], list(SHEET_HEADERS))
+            self.assertEqual(list(data.data["row"]), list(SHEET_HEADERS))
+            self.assertEqual(data.data["row"]["payment_status"], "VERIFIED")
+            self.assertTrue(data.data["row"]["verified_by"])
+            self.assertTrue(data.data["row"]["verified_at"])
+            self.assertTrue(data.data["row"]["last_synced_at"])
+            sheets[data.data["row"]["ticket_number"]] = data.data["sheet_name"]
+            rows[data.data["row"]["ticket_number"]] = data.data["row"]
+            self.assertEqual(data.data["attempt"], job["attempt"])
+
+            synced = self.client.post(
+                f"/api/internal/sheet-jobs/{job['job_id']}/synced",
+                {"attempt": job["attempt"]},
+                format="json",
+                **self.auth_headers(),
+            )
+            self.assertEqual(synced.status_code, 200, synced.data)
+            self.assertEqual(synced.data["status"], "SYNCED")
+
+        self.assertEqual(
+            sheets,
+            {
+                online_ticket.ticket_code: "Online_Tickets",
+                on_spot_tickets[0].ticket_code: "OnSpot_Tickets",
+            },
+        )
+        self.assertEqual(
+            TicketSheetSync.objects.filter(status=TicketSheetSync.Status.SYNCED).count(),
+            2,
+        )
+
+    def test_unverified_online_tickets_do_not_queue_sheet_jobs(self):
+        registration, tickets = self.make_registration(
+            source=Registration.Source.ONLINE,
+            email="unverified-sheet@example.test",
+            number=3,
+        )
+        registration.status = Registration.Status.TICKET_ISSUED
+        registration.save(update_fields=("status", "updated_at"))
+        ensure_ticket_sheet_syncs(registration, tickets)
+
+        self.assertFalse(TicketSheetSync.objects.exists())
+        self.assertFalse(TicketDelivery.objects.exists())
+
+    def test_verified_payu_ticket_queues_without_human_verifier(self):
+        registration, tickets = self.make_registration(
+            source=Registration.Source.ONLINE,
+            email="payu-sheet@example.test",
+            number=5,
+        )
+        intent = PaymentIntent.objects.create(
+            idempotency_key=uuid.uuid4(),
+            request_hash="sheet-sync-payu",
+            event=self.event,
+            ticket_tier=self.tier,
+            buyer_name=registration.buyer_name,
+            buyer_email=registration.buyer_email,
+            buyer_phone=registration.buyer_phone,
+            attendee_names=[tickets[0].attendee_name],
+            status=PaymentIntent.Status.VERIFIED,
+            registration=registration,
+        )
+        Payment.objects.create(
+            intent=intent,
+            provider=Payment.Provider.PAYU,
+            amount=14900,
+            currency="INR",
+            status=Payment.Status.CAPTURED,
+            verification_status=Payment.VerificationStatus.VERIFIED,
+            ticket_issuance_status=Payment.TicketIssuanceStatus.ISSUED,
+            verified_at=timezone.now(),
+        )
+
+        ensure_ticket_sheet_syncs(registration, tickets)
+
+        sync = TicketSheetSync.objects.get(ticket=tickets[0])
+        row = sheet_sync_data(sync)["row"]
+        self.assertEqual(row["payment_method"], Payment.Provider.PAYU)
+        self.assertEqual(row["verified_by"], "Payment gateway")
+
+    def test_reconciliation_requeues_existing_eligible_rows(self):
+        ticket = self.make_paid_online_ticket()
+        sync = TicketSheetSync.objects.get(ticket=ticket)
+        sync.status = TicketSheetSync.Status.SYNCED
+        sync.attempt_count = 4
+        sync.save(update_fields=("status", "attempt_count", "updated_at"))
+
+        count = backfill_ticket_sheet_syncs()
+
+        sync.refresh_from_db()
+        self.assertEqual(count, 1)
+        self.assertEqual(sync.status, TicketSheetSync.Status.PENDING)
+        self.assertEqual(sync.attempt_count, 0)
+
+    def test_unauthenticated_user_cannot_claim_or_update_sheet_jobs(self):
+        create_college_student_ticket(
+            event=self.event,
+            student_name="Student",
+            student_email="student-auth@example.test",
+        )
+
+        response = self.client.get("/api/internal/sheet-jobs/pending")
+        claim_response = self.client.post(
+            "/api/internal/email-jobs/claim-from-sheet",
+            {"ticket_id": str(uuid.uuid4())},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(claim_response.status_code, 401)
+
+    def test_sheet_email_claim_is_disabled_and_does_not_modify_ticket_or_sync(self):
+        ticket = self.make_paid_online_ticket()
+        delivery_count = TicketDelivery.objects.count()
+        sync = TicketSheetSync.objects.get(ticket=ticket)
+        sync.status = TicketSheetSync.Status.SYNCED
+        sync.synced_at = timezone.now()
+        sync.save(update_fields=("status", "synced_at"))
+        headers = self.auth_headers()
+        claim = self.client.post(
+            "/api/internal/email-jobs/claim-from-sheet",
+            {"ticket_id": str(ticket.id)},
+            format="json",
+            **headers,
+        )
+
+        self.assertEqual(claim.status_code, 200, claim.data)
+        self.assertFalse(claim.data["claimed"])
+        self.assertEqual(claim.data["reason"], "Email delivery is disabled.")
+        self.assertEqual(TicketDelivery.objects.count(), delivery_count)
+
+        duplicate = self.client.post(
+            "/api/internal/email-jobs/claim-from-sheet",
+            {"ticket_id": str(ticket.id)},
+            format="json",
+            **headers,
+        )
+
+        self.assertEqual(duplicate.status_code, 200, duplicate.data)
+        self.assertFalse(duplicate.data["claimed"])
+        sync.refresh_from_db()
+        self.assertEqual(sync.status, TicketSheetSync.Status.SYNCED)
+        self.assertEqual(TicketDelivery.objects.count(), delivery_count)
+
+    def test_sheet_email_claim_rejects_unpaid_or_unknown_ticket(self):
+        _, tickets = self.make_registration(
+            source=Registration.Source.ONLINE,
+            email="unpaid-claim@example.test",
+            number=6,
+        )
+        unpaid_claim = self.client.post(
+            "/api/internal/email-jobs/claim-from-sheet",
+            {"ticket_id": str(tickets[0].id)},
+            format="json",
+            **self.auth_headers(),
+        )
+        unknown_claim = self.client.post(
+            "/api/internal/email-jobs/claim-from-sheet",
+            {"ticket_id": str(uuid.uuid4())},
+            format="json",
+            **self.auth_headers(),
+        )
+
+        self.assertEqual(unpaid_claim.status_code, 200, unpaid_claim.data)
+        self.assertFalse(unpaid_claim.data["claimed"])
+        self.assertEqual(unknown_claim.status_code, 200, unknown_claim.data)
+        self.assertFalse(unknown_claim.data["claimed"])
+
+    def test_failed_sheet_sync_uses_bounded_backoff_and_safe_retry(self):
+        _, tickets = self.make_registration(
+            source=Registration.Source.ON_SPOT,
+            email="retry-sheet@example.test",
+            number=4,
+        )
+        sync = TicketSheetSync.objects.get(ticket=tickets[0])
+        claimed = self.client.get(
+            "/api/internal/sheet-jobs/pending",
+            **self.auth_headers(),
+        )
+        job = claimed.data["jobs"][0]
+        failed = self.client.post(
+            f"/api/internal/sheet-jobs/{job['job_id']}/failed",
+            {"attempt": job["attempt"], "error_code": "SHEETS_UPSERT_FAILED"},
+            format="json",
+            **self.auth_headers(),
+        )
+
+        self.assertEqual(failed.status_code, 200, failed.data)
+        sync.refresh_from_db()
+        self.assertEqual(sync.status, TicketSheetSync.Status.PENDING)
+        self.assertGreater(sync.retry_after, timezone.now())
+        self.assertEqual(
+            self.client.get(
+                "/api/internal/sheet-jobs/pending",
+                **self.auth_headers(),
+            ).data["count"],
+            0,
+        )
+
+        sync.retry_after = timezone.now() - timedelta(seconds=1)
+        sync.save(update_fields=("retry_after",))
+        retried = self.client.get(
+            "/api/internal/sheet-jobs/pending",
+            **self.auth_headers(),
+        )
+        self.assertEqual(retried.data["jobs"][0]["attempt"], 2)
+
+    def test_check_in_updates_the_existing_ticket_row(self):
+        _, tickets = self.make_registration(
+            source=Registration.Source.ON_SPOT,
+            email="checked-in-sheet@example.test",
+            number=7,
+        )
+        ticket = tickets[0]
+        sync = TicketSheetSync.objects.get(ticket=ticket)
+        sync.status = TicketSheetSync.Status.SYNCED
+        sync.synced_at = timezone.now()
+        sync.save(update_fields=("status", "synced_at"))
+
+        scan_ticket(token=ticket.token, scanner=self.admin)
+
+        sync.refresh_from_db()
+        self.assertEqual(sync.status, TicketSheetSync.Status.PENDING)
+        pending = self.client.get(
+            "/api/internal/sheet-jobs/pending",
+            **self.auth_headers(),
+        )
+        job = pending.data["jobs"][0]
+        data = self.client.get(
+            f"/api/internal/sheet-jobs/{job['job_id']}/data",
+            {"attempt": job["attempt"]},
+            **self.auth_headers(),
+        )
+
+        self.assertEqual(data.data["row"]["ticket_status"], "USED")
+        self.assertEqual(data.data["row"]["scan_status"], "CHECKED_IN")
+        self.assertTrue(data.data["row"]["checked_in_at"])
+        self.assertEqual(data.data["row"]["checked_in_by"], "Sheet Admin")
+        self.assertEqual(
+            TicketScan.objects.filter(ticket=ticket, result="ENTRY_GRANTED").count(),
+            1,
+        )
+
+    def test_cancellation_updates_the_existing_ticket_row(self):
+        _, tickets = self.make_registration(
+            source=Registration.Source.ON_SPOT,
+            email="cancelled-sheet@example.test",
+            number=8,
+        )
+        ticket = tickets[0]
+        sync = TicketSheetSync.objects.get(ticket=ticket)
+        sync.status = TicketSheetSync.Status.SYNCED
+        sync.synced_at = timezone.now()
+        sync.save(update_fields=("status", "synced_at"))
+
+        cancel_ticket(ticket.id, self.admin)
+
+        sync.refresh_from_db()
+        self.assertEqual(sync.status, TicketSheetSync.Status.PENDING)
+        pending = self.client.get(
+            "/api/internal/sheet-jobs/pending",
+            **self.auth_headers(),
+        )
+        job = pending.data["jobs"][0]
+        data = self.client.get(
+            f"/api/internal/sheet-jobs/{job['job_id']}/data",
+            {"attempt": job["attempt"]},
+            **self.auth_headers(),
+        )
+        self.assertEqual(data.data["row"]["ticket_status"], "CANCELLED")
+        self.assertEqual(data.data["row"]["scan_status"], "NOT_CHECKED_IN")
+
+    def test_disabled_email_compatibility_routes_do_not_change_sheet_sync(self):
+        ticket = self.make_paid_online_ticket()
+        sync = TicketSheetSync.objects.get(ticket=ticket)
+        sync.status = TicketSheetSync.Status.SYNCED
+        sync.synced_at = timezone.now()
+        sync.save(update_fields=("status", "synced_at"))
+        claim = self.client.get(
+            "/api/internal/email-jobs/pending",
+            **self.auth_headers(),
+        )
+        self.assertEqual(claim.status_code, 200, claim.data)
+        self.assertEqual(claim.data, {"count": 0, "jobs": []})
+        sync.refresh_from_db()
+        self.assertEqual(sync.status, TicketSheetSync.Status.SYNCED)
+        self.assertFalse(TicketDelivery.objects.exists())
+
+        claim = self.client.post(
+            "/api/internal/email-jobs/claim-from-sheet",
+            {"ticket_id": str(ticket.pk)},
+            format="json",
+            **self.auth_headers(),
+        )
+        self.assertEqual(claim.status_code, 200, claim.data)
+        self.assertFalse(claim.data["claimed"])
+        sync.refresh_from_db()
+        self.assertEqual(sync.status, TicketSheetSync.Status.SYNCED)
+
+    def test_sheet_failure_becomes_terminal_after_fifth_attempt(self):
+        _, tickets = self.make_registration(
+            source=Registration.Source.ON_SPOT,
+            email="terminal-sheet@example.test",
+            number=5,
+        )
+        sync = TicketSheetSync.objects.get(ticket=tickets[0])
+        sync.status = TicketSheetSync.Status.PROCESSING
+        sync.attempt_count = 5
+        sync.lease_expires_at = timezone.now() + timedelta(minutes=5)
+        sync.save(
+            update_fields=("status", "attempt_count", "lease_expires_at")
+        )
+
+        response = self.client.post(
+            f"/api/internal/sheet-jobs/{sync.id}/failed",
+            {"attempt": 5, "error_code": "SHEETS_REJECTED"},
+            format="json",
+            **self.auth_headers(),
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        sync.refresh_from_db()
+        self.assertEqual(sync.status, TicketSheetSync.Status.FAILED)
+        self.assertIsNotNone(sync.failed_at)

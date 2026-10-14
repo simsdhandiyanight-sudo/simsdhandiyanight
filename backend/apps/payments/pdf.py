@@ -254,6 +254,58 @@ def generate_tickets_pdf(tickets):
     return output.getvalue()
 
 
+def generate_college_student_ticket_pdf(ticket):
+    event = ticket.event
+    event_date, event_time = _event_datetime(event)
+    output = BytesIO()
+    document = SimpleDocTemplate(
+        output,
+        pagesize=A5,
+        rightMargin=16 * mm,
+        leftMargin=16 * mm,
+        topMargin=12 * mm,
+        bottomMargin=12 * mm,
+        title=f"College student ticket {ticket.ticket_code}",
+        pageCompression=0,
+    )
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        "CollegeTicketTitle",
+        parent=styles["Title"],
+        alignment=TA_CENTER,
+        textColor=colors.HexColor("#b71959"),
+        fontName="Helvetica-Bold",
+        fontSize=16,
+        leading=20,
+    )
+    body_style = ParagraphStyle(
+        "CollegeTicketBody",
+        parent=styles["BodyText"],
+        alignment=TA_CENTER,
+        fontSize=10,
+        leading=15,
+    )
+    story = [
+        _ticket_image("sims-logo.png", width=22 * mm, height=22 * mm),
+        Paragraph(escape(event.name), title_style),
+        Paragraph("COLLEGE STUDENT ADMISSION TICKET", body_style),
+        Spacer(1, 5 * mm),
+        Paragraph(f"<b>Student</b><br/>{escape(ticket.student_name)}", body_style),
+        Paragraph(f"<b>Ticket ID</b><br/>{escape(ticket.ticket_code)}", body_style),
+        Paragraph(f"<b>Date</b><br/>{escape(event_date)}", body_style),
+        Paragraph(f"<b>Time</b><br/>{escape(event_time)}", body_style),
+        Paragraph(
+            f"<b>Venue</b><br/>{escape(event.venue)} · {escape(event.city)}",
+            body_style,
+        ),
+        Spacer(1, 5 * mm),
+        TicketQr(ticket.token, size=42 * mm),
+        Paragraph("Scan this QR code at the event entrance.", body_style),
+    ]
+    document.build(story)
+    return output.getvalue()
+
+
 def generate_ticket_id_confirmation_pdf(registration):
     from .models import Payment
 

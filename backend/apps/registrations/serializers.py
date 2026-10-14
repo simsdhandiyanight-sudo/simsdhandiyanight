@@ -24,12 +24,12 @@ class BuyerSerializer(serializers.Serializer):
 class CreateRegistrationSerializer(serializers.Serializer):
     event_id = serializers.UUIDField()
     ticket_tier_id = serializers.UUIDField()
+    quantity = serializers.IntegerField(min_value=1, required=False, default=1)
     buyer = BuyerSerializer()
     attendee_names = serializers.ListField(
         child=serializers.CharField(max_length=200, trim_whitespace=True),
         required=False,
         allow_empty=False,
-        max_length=10,
     )
 
     def validate_attendee_names(self, names):

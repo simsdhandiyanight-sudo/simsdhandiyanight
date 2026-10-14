@@ -218,28 +218,22 @@ CLOUDINARY_CLOUD_NAME = os.environ.get("CLOUDINARY_CLOUD_NAME", "").strip()
 CLOUDINARY_API_KEY = os.environ.get("CLOUDINARY_API_KEY", "").strip()
 CLOUDINARY_API_SECRET = os.environ.get("CLOUDINARY_API_SECRET", "").strip()
 CLOUDINARY_PAYMENT_PROOF_FOLDER = "college-ticketing/payment-proofs"
-EMAIL_BACKEND = os.environ.get(
-    "EMAIL_BACKEND",
-    "django.core.mail.backends.smtp.EmailBackend",
+DJANGO_INTERNAL_API_KEY = os.environ.get("DJANGO_INTERNAL_API_KEY", "").strip()
+N8N_SHEET_SYNC_JOB_LEASE_MINUTES = positive_integer_setting(
+    "N8N_SHEET_SYNC_JOB_LEASE_MINUTES",
+    10,
 )
-EMAIL_HOST = os.environ.get("EMAIL_HOST", "localhost")
-EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "25"))
-EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
-EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
-EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "false").lower() == "true"
-EMAIL_USE_SSL = os.environ.get("EMAIL_USE_SSL", "false").lower() == "true"
-EMAIL_TIMEOUT = int(os.environ.get("EMAIL_TIMEOUT", "10"))
-DEFAULT_FROM_EMAIL = os.environ.get(
-    "DEFAULT_FROM_EMAIL",
-    "Soundarya Ticketing <tickets@localhost>",
+GOOGLE_SHEETS_SPREADSHEET_ID = os.environ.get(
+    "GOOGLE_SHEETS_SPREADSHEET_ID",
+    "",
+).strip()
+GOOGLE_SHEETS_SERVICE_ACCOUNT_JSON = os.environ.get(
+    "GOOGLE_SHEETS_SERVICE_ACCOUNT_JSON",
+    "",
+).strip()
+COLLEGE_TICKET_ID_PREFIX = (
+    os.environ.get("COLLEGE_TICKET_ID_PREFIX", "").strip() or "SIMS-DN"
 )
-BREVO_API_KEY = os.environ.get("BREVO_API_KEY", "")
-BREVO_SENDER_EMAIL = os.environ.get("BREVO_SENDER_EMAIL", "")
-BREVO_SENDER_NAME = os.environ.get(
-    "BREVO_SENDER_NAME",
-    "Soundarya Institute",
-)
-BREVO_WEBHOOK_TOKEN = os.environ.get("BREVO_WEBHOOK_TOKEN", "")
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [

@@ -123,13 +123,12 @@ Examples:
 
 ```text
 View public event information
-Online registration
+Start online payment registration
 ```
 
 ### Protected
 
 ```text
-On-spot registration
 Ticket scanning
 Ticket management
 Event management
@@ -137,6 +136,10 @@ Dashboard
 User management
 Audit information
 ```
+
+New on-spot registration and outbound email delivery are disabled. Historical
+on-spot records remain visible to authorized staff for lookup, scanning, and
+reporting.
 
 The exact authorization requirements must follow `SECURITY.md`.
 
@@ -195,9 +198,7 @@ Can manage:
 ### REGISTRATION_STAFF
 Can:
 
-- Create on-spot registrations
-- View relevant registration information
-- Generate tickets
+- View relevant registration information, including historical on-spot records
 
 ### SCANNER_STAFF
 Can:
@@ -360,13 +361,7 @@ Administrative listing:
 GET /api/v1/registrations/
 ```
 
-On-spot creation is staff-authorized:
-
-```http
-POST /api/v1/registrations/on-spot/
-```
-
-Public online creation uses the payment-order and verification flow in section 14; direct public `POST /api/v1/registrations/` is blocked with `402 PAYMENT_REQUIRED`. One completed registration represents one buyer/order and may return one or more tickets. Each returned ticket has its own ID, attendee name, and opaque QR token; the current combo returns six tickets. Include exactly one valid `attendee_names` entry per admission in the selected offer. The buyer name is the first attendee name, and the buyer email and phone are shared once on the registration.
+Public online creation uses the payment-order and verification flow in section 14; direct public `POST /api/v1/registrations/` is blocked with `402 PAYMENT_REQUIRED`. A registration represents one buyer/order and may purchase multiple copies of one configured ticket offer. The optional positive integer `quantity` defaults to `1`; the server validates inventory and calculates the total using the configured offer price. The created registration reserves `quantity * admission_count` admissions and, after verified payment, issues that many distinct tickets. Each returned ticket has its own ID, attendee name, and opaque QR token. Include exactly one valid `attendee_names` entry per admission across all offers; the buyer name is the first attendee name, and buyer email and phone are shared once on the registration.
 
 Registration and ticket responses include a human-facing `registration_code`
 such as `SIMS-DN-2026-00001`. Codes increment continuously per event year and
@@ -430,7 +425,7 @@ This implementation follows PayU's [Hosted Checkout](https://docs.payu.in/docs/c
 
 Set backend-only `PAYU_MERCHANT_KEY` and `PAYU_MERCHANT_SALT`, plus `PAYU_ENVIRONMENT=test` during sandbox integration. Production uses `PAYU_ENVIRONMENT=production`; test and production merchant credentials must remain separate. `PAYU_SUCCESS_URL` and `PAYU_FAILURE_URL` should point to the backend callback URLs. `PAYU_WEBHOOK_URL` is the corresponding public webhook endpoint for dashboard configuration.
 
-Direct public `POST /api/v1/registrations/` returns `402 PAYMENT_REQUIRED`; it cannot issue online tickets. Authorized on-spot registration continues through its protected endpoint and does not use the payment gateway.
+Direct public `POST /api/v1/registrations/` returns `402 PAYMENT_REQUIRED`; it cannot issue tickets. New on-spot registration is disabled. Existing on-spot records remain available to authorized staff and administrators for lookup, scanning, reporting, and ticket validity.
 
 The Dhandiya Night canonical event UUID is `8b3f7a20-6e8d-4b91-a462-9c5d2f1e7043`, with slug `dhandiya-night-2026`. The public landing page uses hardcoded descriptive content; event detail and ticket availability are loaded from the backend API. Render seeds the canonical event and ticket tiers at startup. Do not use the frontend demo ID `evt-technova-2026` as the production event primary key.
 
@@ -438,30 +433,11 @@ Configured offer prices are ₹149 for one admission and ₹745 for six combo ad
 
 ---
 
-# 15. On-Spot Registration
-On-spot registration is a protected operation.
-
-Conceptual flow:
-
-```text
-Staff Authentication
-        ↓
-POST /registrations/
-        ↓
-Backend Authorization
-        ↓
-Validate attendee data
-        ↓
-registration_source = ON_SPOT
-        ↓
-Create Registration
-        ↓
-Create one Ticket per admission in selected offer
-        ↓
-Return Registration and Tickets
-```
-
-The server should ensure that unauthorized users cannot create on-spot registrations.
+# 15. Historical On-Spot Registrations
+The staff creation route and form have been removed. Historical on-spot
+registration rows, source values, issued tickets, scan records, reporting, and
+the `OnSpot_Tickets` Sheets mapping are retained. They are not migrated or
+deleted.
 
 ---
 
@@ -987,15 +963,14 @@ A scanner operation must be able to handle legitimate rapid scanning while still
 ---
 
 # 37. Registration Idempotency
-Online payment-order and on-spot registration requests require an `Idempotency-Key` header containing a UUID. Browser clients making cross-origin requests must be allowed to send this header by the API's CORS policy.
+Online payment-order requests require an `Idempotency-Key` header containing a UUID. Browser clients making cross-origin requests must be allowed to send this header by the API's CORS policy.
 
 ```http
 Idempotency-Key: 85635d34-bcbf-4a6d-b15e-0019e16bba80
 ```
 
-The client reuses the same key for retries of one logical attempt. Online requests persist the key and normalized request fingerprint in `PaymentIntent`; its primary-key constraint arbitrates concurrent requests and the intent is associated with the resulting registration and payment records. On-spot requests store the key and fingerprint in `RegistrationIdempotency` in the same transaction that creates the registration and tickets.
+The client reuses the same key for retries of one logical online-payment attempt. Online requests persist the key and normalized request fingerprint in `PaymentIntent`; its primary-key constraint arbitrates concurrent requests and the intent is associated with the resulting registration and payment records. New on-spot registration is disabled; historical `RegistrationIdempotency` records are retained.
 
-- On-spot creation returns `201 Created` with `Idempotency-Replayed: false`; a replay returns the same registration/tickets with `200 OK` and `Idempotency-Replayed: true`.
 - Online order creation returns `201 Created` for a new order and `200 OK` for a replay, with a `replayed` boolean in the JSON response. If the intent is already paid, the replay also returns the original registration/tickets.
 - Reusing the key with a different request returns `409 Conflict` (`IDEMPOTENCY_CONFLICT`).
 - If creation fails, the transaction rolls back the key and any partial registration/tickets, so the same key can be retried.
@@ -1102,7 +1077,6 @@ Examples:
 Event created
 Event updated
 Registration created
-On-spot registration created
 Ticket cancelled
 Ticket scanned
 User permission changed
@@ -1242,12 +1216,14 @@ External services should be isolated behind dedicated integration modules.
 Examples, if introduced:
 
 ```text
-Email service
 SMS service
 Payment provider
 Cloud storage
 Analytics
 ```
+
+Outbound email sending is disabled; registration email addresses are retained
+as contact data, not used to send messages.
 
 Do not spread third-party SDK calls throughout business logic.
 
@@ -1261,7 +1237,6 @@ Important API tests include:
 ```text
 Public event retrieval
 Online registration
-On-spot registration authorization
 Ticket generation
 Ticket cancellation
 Valid scan
@@ -1413,34 +1388,11 @@ When the implementation changes a stable API convention, update this document ra
 
 ---
 
-# 55. Ticket Email Delivery
-
-Ticket email is queued as one `TicketDelivery` record per issued ticket. Online
-deliveries become eligible only after verified payment; on-spot deliveries are
-eligible after registration. The payment verification endpoint does not wait
-for Brevo and never treats an email failure as a payment failure.
-
-Administrators can inspect the queue at `GET /api/v1/payments/delivery/dashboard/`,
-retry a failed message at
-`POST /api/v1/payments/delivery/{delivery_id}/retry/`, and change an unsent
-message's priority at
-`PATCH /api/v1/payments/delivery/{delivery_id}/priority/` with
-`{"priority":"STAFF"}`, `{"priority":"COMPLIMENTARY"}`, or
-`{"priority":"REGULAR"}`. These operations require the ADMIN role.
-
-Brevo delivery callbacks use `POST /api/v1/payments/brevo/webhook/`, the
-`X-Brevo-Webhook-Token` secret, and an event plus message ID. Configure the
-Brevo callback and application secrets out of band; credentials are never
-returned to the frontend.
-
-Run `python manage.py process_ticket_emails` as a scheduled worker, or
-`python manage.py process_ticket_emails --loop` under a process supervisor.
-Configure `BREVO_API_KEY`, `BREVO_SENDER_EMAIL`, and optionally
-`BREVO_SENDER_NAME` and `BREVO_WEBHOOK_TOKEN`. Without the API key and sender,
-the worker exits with a configuration error.
-
-The local daily allocation is strictly 295 regular messages and 5 staff or
-complimentary messages. Unused priority slots are not borrowed by regular
-messages. A timeout or provider 5xx has an ambiguous outcome: the item remains
-in `SENDING` with its slot reserved to prevent duplicate delivery. Reconcile
-such an item against Brevo before taking manual recovery action.
+# 55. Outbound Email Removal
+Outbound email sending, retry/queue controls, and email-delivery navigation
+have been removed. No new email jobs are created; the internal pending-job
+endpoint returns an empty batch to keep previously configured pollers from
+claiming work. Existing delivery records and Google Sheets email-history
+columns remain intact and are not deleted. Disable any previously activated
+n8n email workflows during deployment. Manual-payment applicants can download
+issued tickets from their proof-access page after payment verification.

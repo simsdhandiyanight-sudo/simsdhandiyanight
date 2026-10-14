@@ -24,7 +24,10 @@ from apps.payments.cloudinary_storage import (
     get_payment_proof_content,
     upload_payment_proof as upload_cloudinary_payment_proof,
 )
-from apps.payments.proof import expire_payment_proof_reservations
+from apps.payments.proof import (
+    PaymentProofConflict,
+    expire_payment_proof_reservations,
+)
 from apps.registrations.models import InventoryReservation, Registration
 from apps.scanning.models import Gate, StaffAssignment, TicketScan
 from apps.scanning.services import scan_ticket
@@ -39,8 +42,7 @@ PNG_IMAGE = base64.b64decode(
 @override_settings(
     PAYMENT_PROOF_RESERVATION_HOURS=24,
     PAYMENT_PROOF_RESUBMISSION_HOURS=12,
-    BREVO_API_KEY="",
-    BREVO_SENDER_EMAIL="",
+    DJANGO_INTERNAL_API_KEY="n8n-test-token",
 )
 class ManualPaymentProofTests(TestCase):
     def setUp(self):
@@ -218,6 +220,56 @@ class ManualPaymentProofTests(TestCase):
         self.assertEqual(first.data["ticket_id"], "SIMS-DN-20260001")
         self.assertEqual(second.data["ticket_id"], "SIMS-DN-20260002")
 
+    def test_multiple_ticket_quantity_reserves_and_issues_unique_tickets(self):
+        payload = {
+            **self.payload,
+            "quantity": 2,
+            "attendee_names": ["Test Buyer", "Second Attendee"],
+        }
+        response = self.client.post(
+            "/api/v1/payments/proof/registrations/",
+            payload,
+            format="json",
+            HTTP_IDEMPOTENCY_KEY=str(uuid.uuid4()),
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["amount"], 298.0)
+
+        registration = Registration.objects.get(pk=response.data["registration_id"])
+        intent = PaymentIntent.objects.get(registration=registration)
+        self.assertEqual(intent.quantity, 2)
+        self.assertEqual(registration.inventory_reservation.units_reserved, 2)
+
+        submitted = self.submit_proof(response.data)
+        self.assertEqual(submitted.status_code, 201, submitted.data)
+        payment = Payment.objects.get(pk=submitted.data["payment_id"])
+        self.client.force_authenticate(self.admin)
+        approved = self.client.post(
+            f"/api/v1/payments/proof/{payment.pk}/approve/",
+            {"confirmed_received": True},
+            format="json",
+        )
+        self.assertEqual(approved.status_code, 200, approved.data)
+
+        tickets = list(registration.tickets.order_by("ticket_code"))
+        self.assertEqual(len(tickets), 2)
+        self.assertEqual(
+            [ticket.attendee_name for ticket in tickets],
+            ["Test Buyer", "Second Attendee"],
+        )
+        self.assertEqual(len({ticket.token for ticket in tickets}), 2)
+
+    def test_multiple_ticket_quantity_requires_one_name_per_admission(self):
+        response = self.client.post(
+            "/api/v1/payments/proof/registrations/",
+            {**self.payload, "quantity": 2},
+            format="json",
+            HTTP_IDEMPOTENCY_KEY=str(uuid.uuid4()),
+        )
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertEqual(Registration.objects.count(), 0)
+        self.assertEqual(PaymentIntent.objects.count(), 0)
+
     def test_rejection_resubmission_keeps_ticket_id_and_expiry_releases_inventory(self):
         registration_result = self.start_registration()
         submitted = self.submit_proof(registration_result)
@@ -226,17 +278,18 @@ class ManualPaymentProofTests(TestCase):
         payment = Payment.objects.get(pk=submitted.data["payment_id"])
         self.client.force_authenticate(self.admin)
 
-        with patch(
-            "apps.payments.delivery.send_payment_rejection_email",
-            return_value="FAILED",
-        ):
-            rejected = self.client.post(
-                f"/api/v1/payments/proof/{payment.pk}/reject/",
-                {"reason": "The bank transaction is not visible."},
-                format="json",
-            )
+        rejected = self.client.post(
+            f"/api/v1/payments/proof/{payment.pk}/reject/",
+            {"reason": "The bank transaction is not visible."},
+            format="json",
+        )
         self.assertEqual(rejected.status_code, 200, rejected.data)
-        self.assertEqual(rejected.data["rejection_email_status"], "FAILED")
+        self.assertEqual(rejected.data["rejection_email_status"], "DISABLED")
+        n8n = APIClient()
+        n8n.credentials(HTTP_AUTHORIZATION="Token n8n-test-token")
+        pending = n8n.get("/api/internal/email-jobs/pending")
+        self.assertEqual(pending.status_code, 200, pending.data)
+        self.assertEqual(pending.data["count"], 0)
         dashboard = self.client.get("/api/v1/payments/proof/dashboard/")
         self.assertEqual(dashboard.status_code, 200, dashboard.data)
         self.assertEqual(dashboard.data["proofs"][0]["rejected_by"], "Proof Admin")
@@ -277,15 +330,11 @@ class ManualPaymentProofTests(TestCase):
         self.assertEqual(rejected_again.status_code, 401)
 
         self.client.force_authenticate(self.admin)
-        with patch(
-            "apps.payments.delivery.send_payment_rejection_email",
-            return_value="FAILED",
-        ):
-            rejected_corrected = self.client.post(
-                f"/api/v1/payments/proof/{corrected.data['payment_id']}/reject/",
-                {"reason": "The transaction amount did not match."},
-                format="json",
-            )
+        rejected_corrected = self.client.post(
+            f"/api/v1/payments/proof/{corrected.data['payment_id']}/reject/",
+            {"reason": "The transaction amount did not match."},
+            format="json",
+        )
         self.assertEqual(rejected_corrected.status_code, 200, rejected_corrected.data)
         expired = expire_payment_proof_reservations(
             now=timezone.now() + timedelta(hours=13)
@@ -299,11 +348,37 @@ class ManualPaymentProofTests(TestCase):
         )
         self.assertEqual(Ticket.objects.count(), 0)
 
+
     def test_admin_approval_checks_confirmation_and_issues_one_final_ticket(self):
         registration_result = self.start_registration()
         submitted = self.submit_proof(registration_result)
         self.assertEqual(submitted.status_code, 201, submitted.data)
         payment = Payment.objects.get(pk=submitted.data["payment_id"])
+
+        n8n = APIClient()
+        n8n.credentials(HTTP_AUTHORIZATION="Token n8n-test-token")
+        pending = n8n.get("/api/internal/email-jobs/pending")
+        self.assertEqual(pending.status_code, 200, pending.data)
+        self.assertEqual(pending.data["count"], 0)
+
+        tickets_url = (
+            f"/api/v1/payments/proof/registrations/"
+            f"{registration_result['registration_id']}/tickets.pdf"
+        )
+        not_issued = self.client.get(
+            tickets_url,
+            HTTP_X_PROOF_ACCESS_TOKEN=registration_result["proof_access_token"],
+        )
+        self.assertEqual(not_issued.status_code, 404)
+
+        unauthorized = self.client.post(
+            f"/api/v1/payments/proof/{payment.pk}/approve/",
+            {"confirmed_received": True},
+            format="json",
+        )
+        self.assertEqual(unauthorized.status_code, 401)
+        self.assertEqual(Ticket.objects.count(), 0)
+
         self.client.force_authenticate(self.admin)
 
         not_confirmed = self.client.post(
@@ -336,7 +411,23 @@ class ManualPaymentProofTests(TestCase):
         self.assertIsNotNone(payment.verified_at)
         self.assertEqual(registration.status, Registration.Status.TICKET_ISSUED)
         self.assertEqual(registration.tickets.count(), 1)
-        self.assertEqual(TicketDelivery.objects.filter(ticket__registration=registration).count(), 1)
+        self.assertEqual(TicketDelivery.objects.filter(ticket__registration=registration).count(), 0)
+        self.assertEqual(approved.data["email_status"], "DISABLED")
+        self.client.force_authenticate(None)
+        with patch(
+            "apps.payments.pdf.generate_tickets_pdf",
+            return_value=b"%PDF-issued-ticket",
+        ):
+            downloaded = self.client.get(
+                tickets_url,
+                HTTP_X_PROOF_ACCESS_TOKEN=registration_result["proof_access_token"],
+            )
+        self.assertEqual(downloaded.status_code, 200)
+        self.assertEqual(downloaded["Content-Type"], "application/pdf")
+        self.assertTrue(downloaded.content.startswith(b"%PDF"))
+        jobs_response = n8n.get("/api/internal/email-jobs/pending")
+        self.assertEqual(jobs_response.status_code, 200, jobs_response.data)
+        self.assertEqual(jobs_response.data, {"count": 0, "jobs": []})
         self.assertEqual(
             registration.inventory_reservation.status,
             InventoryReservation.Status.CONSUMED,

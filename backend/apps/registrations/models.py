@@ -131,7 +131,7 @@ class InventoryReservation(models.Model):
         on_delete=models.PROTECT,
         related_name="inventory_reservations",
     )
-    units_reserved = models.PositiveSmallIntegerField()
+    units_reserved = models.PositiveIntegerField()
     status = models.CharField(
         max_length=12,
         choices=Status.choices,

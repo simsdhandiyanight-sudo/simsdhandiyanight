@@ -43,14 +43,13 @@ const ManualPaymentProofPage: React.FC<{
       !details
       || !(
         details.payment_status === 'PENDING_VERIFICATION'
-        || (details.payment_status === 'VERIFIED' && details.email_status === 'PENDING')
       )
     ) {
       return undefined;
     }
     const interval = window.setInterval(() => void refresh(), 15000);
     return () => window.clearInterval(interval);
-  }, [details?.payment_status, details?.email_status, refresh]);
+  }, [details?.payment_status, refresh]);
 
   const submitProof = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -101,6 +100,29 @@ const ManualPaymentProofPage: React.FC<{
         downloadFailure instanceof Error
           ? downloadFailure.message
           : 'Ticket ID confirmation could not be downloaded.',
+      );
+    }
+  };
+
+  const downloadIssuedTickets = async () => {
+    if (!details) return;
+    setDownloadError('');
+    try {
+      const file = await apiBlob(
+        paymentsApi.proofTicketsUrl(registrationId),
+        { headers: { 'X-Proof-Access-Token': accessToken } },
+      );
+      const url = URL.createObjectURL(file);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `tickets-${details.registration_code}.pdf`;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (downloadFailure) {
+      setDownloadError(
+        downloadFailure instanceof Error
+          ? downloadFailure.message
+          : 'Issued tickets could not be downloaded.',
       );
     }
   };
@@ -161,9 +183,8 @@ const ManualPaymentProofPage: React.FC<{
                 <p>
                   Your payment proof has been submitted successfully. Your Ticket ID is{' '}
                   <strong>{details.ticket_id}</strong>. Please save this ID for future reference.
-                  Your payment is awaiting admin verification. Your final admission ticket,
-                  including its QR code, will be sent to your registered email address after
-                  successful verification.
+                  Your payment is awaiting admin verification. Once verified and issued, your
+                  admission ticket and QR code will be available to download from this secure page.
                 </p>
                 <p className="mt-3 text-xs text-amber-900">
                   The Ticket ID is only a tracking/reference identifier. It does not confirm
@@ -190,23 +211,10 @@ const ManualPaymentProofPage: React.FC<{
 
             {paymentVerified && (
               <section className="rounded-2xl border border-emerald-800 bg-emerald-950/30 p-6 text-sm text-emerald-100">
-                <p>Payment verified. Email delivery status: {details.email_status || 'PENDING'}.</p>
-                {details.email_status === 'SENT' ? (
-                  <p className="mt-2">
-                    The email service accepted your final admission ticket for delivery to your
-                    registered email address. Present the QR code in that ticket for entry.
-                  </p>
-                ) : details.email_status === 'FAILED' ? (
-                  <p className="mt-2">
-                    Payment remains verified, but the email could not be sent. The event team can
-                    retry delivery without issuing another ticket.
-                  </p>
-                ) : (
-                  <p className="mt-2">
-                    Your final admission ticket is queued for delivery to your registered email
-                    address. Do not use the Ticket ID confirmation for entry.
-                  </p>
-                )}
+                <p>
+                  Payment is verified. Tickets are not sent by email. Use the secure download
+                  below to save your issued admission ticket and QR code.
+                </p>
               </section>
             )}
 
@@ -303,6 +311,16 @@ const ManualPaymentProofPage: React.FC<{
 
             {submitted && (
               <section className="space-y-3">
+                {paymentVerified && (
+                  <button
+                    type="button"
+                    onClick={() => void downloadIssuedTickets()}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-600"
+                  >
+                    <Download className="h-4 w-4" />
+                    Download issued tickets
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => void downloadTicketId()}

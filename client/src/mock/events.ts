@@ -62,7 +62,7 @@ Join us on 16th October and let the celebration begin`,
     faqs: [
       {
         question: 'Will there be on-spot venue registration available?',
-        answer: 'The registration desk can assist with on-spot registration, subject to availability. This website is a local frontend demo; confirm event-day arrangements with Soundarya Institute.',
+        answer: 'This website does not accept on-spot registrations. Contact the event organizers to ask whether any separate on-site arrangements are available.',
       },
       {
         question: 'How do I present my ticket at entry?',

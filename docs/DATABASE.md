@@ -150,7 +150,7 @@ admission_count
 availability
 ```
 
-For Dhandiya Night, the registration page shows INR 149 for one admission and INR 745 for a six-admission combo. PayU requests add a fixed ₹4 per admission (₹153 and ₹769 total, respectively); this charge is included in the persisted payment amount in minor currency units and is not shown on the registration page. `admission_count` describes the admissions issued for one selected offer; capacity is reserved while a payment transaction is pending and consumed for each resulting ticket.
+For Dhandiya Night, the registration page shows INR 149 for one admission and INR 745 for a six-admission combo. PayU requests add a fixed ₹4 per admission (₹153 and ₹769 total for one offer, respectively); this charge is included in the persisted payment amount in minor currency units and is not shown on the registration page. `admission_count` describes the admissions issued for one selected offer. `PaymentIntent.quantity` stores the number of offers in the order, so capacity reserves `quantity * admission_count` admissions and each resulting admission becomes an individual ticket. Capacity is reserved while payment is pending and consumed when tickets are issued.
 
 ---
 
@@ -200,13 +200,13 @@ The registration model does not impose uniqueness on buyer email or phone. A dif
 ---
 
 ## PaymentIntent
-Stores an idempotent online registration/payment attempt, normalized request fingerprint, buyer and attendee details, pending capacity reservation, and an optional link to the verified registration. The UUID idempotency key is the primary key. A captured payment whose ticket issuance needs investigation moves the intent to `REVIEW_REQUIRED`.
+Stores an idempotent online registration/payment attempt, normalized request fingerprint, buyer and attendee details, offer quantity, pending capacity reservation, and an optional link to the verified registration. The UUID idempotency key is the primary key. A captured payment whose ticket issuance needs investigation moves the intent to `REVIEW_REQUIRED`.
 
 ## Payment
 Stores each payment-provider transaction, amount, currency, lifecycle status, verification status, capture time, ticket-issuance status, expiry, and failure/verification metadata. Provider transaction and payment IDs are unique. The provider field distinguishes PayU payments from retained historical Razorpay records; the migration renames provider ID columns in place without dropping existing values. A conditional database uniqueness constraint permits at most one verified captured payment per payment intent. Captured payments whose tickets were not issued or whose registration is incomplete are retained and reported for administrator review; the application has no refund or settlement-reversal operation.
 
 ## TicketDelivery
-Stores retryable email/PDF delivery state for a registration, including recipient, attempt count, last error, and sent time. It is one-to-one with the registration and does not control ticket validity.
+Retains historical email/PDF delivery state, including recipient, attempt count, last error, and sent time. New email delivery records are no longer created; existing rows remain for audit/reporting and do not control ticket validity.
 
 ---
 
@@ -983,20 +983,18 @@ Only one scanner will scan at a time.
 ---
 
 # 37. On-Spot Registration
-On-spot registration must use the same core registration and ticket tables as online registration.
+New on-spot registration is disabled. Historical on-spot records continue to
+use the same core registration and ticket tables as online registration; these
+source values and records remain necessary for reporting, scanning, and audit.
 
 Example:
 
 ```text
-Staff
-  ↓
-Create Registration
+Historical records
   ↓
 registration_source = ON_SPOT
   ↓
-Resolve selected offer and admission count
-  ↓
-Create one Ticket per admission, each with its own QR token
+Existing per-admission tickets and QR tokens
 ```
 
 Do not create a separate database architecture for on-spot attendees unless a future requirement explicitly demands it.
@@ -1203,21 +1201,10 @@ Critical ticketing rules must remain correct even when requests arrive concurren
 
 ---
 
-# 48. Ticket Email Queue and Quota
+# 48. Historical Email Delivery Data
 
-`TicketDelivery` has a one-to-one relationship with `Ticket`; this ensures a
-combo registration produces an independent email and PDF for each attendee.
-The migration converts historical registration-level delivery rows to
-ticket-level rows and preserves sent states.
-
-`EmailDailyUsage` is keyed by local calendar date. Its database check
-constraints cap regular reservations at 295 and staff/complimentary
-reservations at 5. Workers lock the daily usage row before claiming a pending
-delivery and increment the corresponding reservation in the same transaction.
-Provider acceptance increments the sent count; definite rejection releases
-the reservation. Daily reservations cannot be borrowed across priority classes.
-
-A timeout or provider 5xx may mean Brevo accepted the message even though the
-application did not receive confirmation. Such deliveries intentionally keep
-their reservation and `SENDING` state until reconciled, preventing an automatic
-retry from creating duplicate emails.
+Outbound email sending and retry/queue processing are disabled. The
+`TicketDelivery` and `EmailDailyUsage` models, constraints, and existing rows
+remain for historical audit compatibility; no new delivery jobs are created.
+Historical rows do not control ticket validity or entry. Google Sheets keeps
+its email-history columns to preserve the existing spreadsheet schema.

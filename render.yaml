@@ -53,14 +53,14 @@ services:
         sync: false
       - key: CLOUDINARY_API_SECRET
         sync: false
-      - key: BREVO_API_KEY
+      - key: DJANGO_INTERNAL_API_KEY
         sync: false
-      - key: BREVO_SENDER_EMAIL
-        value: sims.dhandiyanight@gmail.com
-      - key: BREVO_SENDER_NAME
-        value: Soundarya Institute
-      - key: BREVO_WEBHOOK_TOKEN
+      - key: GOOGLE_SHEETS_SPREADSHEET_ID
         sync: false
+      - key: GOOGLE_SHEETS_SERVICE_ACCOUNT_JSON
+        sync: false
+      - key: COLLEGE_TICKET_ID_PREFIX
+        value: SIMS-DN
       - key: BOOTSTRAP_ADMIN_EMAIL
         value: admin@sims.in
       - key: BOOTSTRAP_ADMIN_PASSWORD
@@ -69,69 +69,6 @@ services:
         sync: false
       - key: BOOTSTRAP_ADMIN_NAME
         value: SIMS Admin
-
-  - type: worker
-    name: sims-dhandiya-email-worker
-    runtime: python
-    rootDir: backend
-    plan: starter
-    buildCommand: pip install -r requirements.txt
-    startCommand: python manage.py process_ticket_emails --loop
-    envVars:
-      - key: PYTHON_VERSION
-        value: 3.12.10
-      - key: SECRET_KEY
-        fromService:
-          type: web
-          name: sims-dhandiya-api
-          envVarKey: SECRET_KEY
-      - key: DEBUG
-        value: "false"
-      - key: DATABASE_URL
-        fromService:
-          type: web
-          name: sims-dhandiya-api
-          envVarKey: DATABASE_URL
-      - key: ALLOWED_HOSTS
-        fromService:
-          type: web
-          name: sims-dhandiya-api
-          envVarKey: ALLOWED_HOSTS
-      - key: CORS_ALLOWED_ORIGINS
-        fromService:
-          type: web
-          name: sims-dhandiya-api
-          envVarKey: CORS_ALLOWED_ORIGINS
-      - key: CSRF_TRUSTED_ORIGINS
-        fromService:
-          type: web
-          name: sims-dhandiya-api
-          envVarKey: CSRF_TRUSTED_ORIGINS
-      - key: BREVO_API_KEY
-        fromService:
-          type: web
-          name: sims-dhandiya-api
-          envVarKey: BREVO_API_KEY
-      - key: BREVO_SENDER_EMAIL
-        fromService:
-          type: web
-          name: sims-dhandiya-api
-          envVarKey: BREVO_SENDER_EMAIL
-      - key: BREVO_SENDER_NAME
-        fromService:
-          type: web
-          name: sims-dhandiya-api
-          envVarKey: BREVO_SENDER_NAME
-      - key: PAYMENT_PROOF_RESERVATION_HOURS
-        fromService:
-          type: web
-          name: sims-dhandiya-api
-          envVarKey: PAYMENT_PROOF_RESERVATION_HOURS
-      - key: PAYMENT_PROOF_RESUBMISSION_HOURS
-        fromService:
-          type: web
-          name: sims-dhandiya-api
-          envVarKey: PAYMENT_PROOF_RESUBMISSION_HOURS
 
   - type: cron
     name: sims-dhandiya-payment-proof-expiry
@@ -191,3 +128,37 @@ services:
           type: web
           name: sims-dhandiya-api
           envVarKey: CLOUDINARY_API_SECRET
+
+  - type: cron
+    name: sims-dhandiya-ticket-sheet-sync
+    runtime: python
+    rootDir: backend
+    plan: starter
+    schedule: "*/5 * * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python manage.py process_ticket_sheet_syncs --limit 50
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.10
+      - key: SECRET_KEY
+        fromService:
+          type: web
+          name: sims-dhandiya-api
+          envVarKey: SECRET_KEY
+      - key: DATABASE_URL
+        fromService:
+          type: web
+          name: sims-dhandiya-api
+          envVarKey: DATABASE_URL
+      - key: GOOGLE_SHEETS_SPREADSHEET_ID
+        fromService:
+          type: web
+          name: sims-dhandiya-api
+          envVarKey: GOOGLE_SHEETS_SPREADSHEET_ID
+      - key: GOOGLE_SHEETS_SERVICE_ACCOUNT_JSON
+        fromService:
+          type: web
+          name: sims-dhandiya-api
+          envVarKey: GOOGLE_SHEETS_SERVICE_ACCOUNT_JSON
+      - key: N8N_SHEET_SYNC_JOB_LEASE_MINUTES
+        value: "10"

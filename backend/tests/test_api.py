@@ -1,4 +1,3 @@
-import base64
 import os
 import uuid
 from datetime import timedelta
@@ -9,23 +8,20 @@ from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.test import TestCase, override_settings
 from django.utils import timezone
-import requests
 from rest_framework.test import APIClient
 
 from apps.audit.models import AuditLog
 from apps.events.models import Event, TicketTier
-from apps.payments.delivery import process_next_ticket_email
-from apps.payments.models import EmailDailyUsage, Payment, PaymentIntent, TicketDelivery
+from apps.payments.models import (
+    Payment,
+    PaymentIntent,
+    TicketDelivery,
+    TicketSheetSync,
+)
 from apps.registrations.models import Registration
 from apps.scanning.models import Gate, StaffAssignment, TicketScan
 from apps.registrations.services import RegistrationConflict, create_registration
 from apps.tickets.models import Ticket
-
-
-class FakeBrevoResponse:
-    def __init__(self, message_id, status_code=201):
-        self.status_code = status_code
-        self.json = Mock(return_value={"messageId": message_id})
 
 
 class CanonicalEventSeedTests(TestCase):
@@ -155,8 +151,7 @@ class AdminBootstrapTests(TestCase):
     PAYU_MERCHANT_SALT="payu-test-salt",
     PAYU_ENVIRONMENT="test",
     PAYU_FRONTEND_URL="https://tickets.example.test",
-    BREVO_API_KEY="brevo-test-key",
-    BREVO_SENDER_EMAIL="tickets@example.test",
+    DJANGO_INTERNAL_API_KEY="n8n-test-token",
 )
 class TicketingApiTests(TestCase):
     def setUp(self):
@@ -243,6 +238,10 @@ class TicketingApiTests(TestCase):
             attendee_names=names,
             source=Registration.Source.ON_SPOT,
             created_by=self.registration_staff,
+            payment_confirmation={
+                "payment_received": True,
+                "payment_method": "CASH",
+            },
         )
 
         self.assertEqual(registration.ticket_tier.admission_count, 6)
@@ -280,6 +279,10 @@ class TicketingApiTests(TestCase):
                 buyer=buyer,
                 attendee_names=names,
                 source=Registration.Source.ON_SPOT,
+                payment_confirmation={
+                    "payment_received": True,
+                    "payment_method": "CASH",
+                },
             )
 
         _, tickets = create_registration(
@@ -289,6 +292,10 @@ class TicketingApiTests(TestCase):
             attendee_names=names,
             source=Registration.Source.ON_SPOT,
             exclude_payment_intent_id=uuid.uuid4(),
+            payment_confirmation={
+                "payment_received": True,
+                "payment_method": "CASH",
+            },
         )
         self.assertEqual(len(tickets), 4)
 
@@ -347,6 +354,11 @@ class TicketingApiTests(TestCase):
         if order.status_code >= 400 or order.data.get("payment_verified"):
             return order
         return self.verify_order(order.data["order_id"])
+
+
+
+
+
 
     def test_registration_codes_increment_in_order_and_keep_uuid_for_api_identity(self):
         first = self.create_online_registration()
@@ -440,42 +452,8 @@ class TicketingApiTests(TestCase):
         self.assertEqual(Ticket.objects.filter(registration_id=response.data["registration"]["id"]).count(), 4)
         self.assertEqual(self.event.registrations.count(), 1)
         self.assertEqual(AuditLog.objects.filter(action="REGISTRATION_CREATED").count(), 1)
-        self.assertEqual(TicketDelivery.objects.count(), 4)
-        self.assertEqual(
-            set(TicketDelivery.objects.values_list("status", flat=True)),
-            {TicketDelivery.Status.PENDING},
-        )
-        with patch(
-            "apps.payments.delivery.requests.post",
-            side_effect=[
-                FakeBrevoResponse("message-1"),
-                FakeBrevoResponse("message-2"),
-                FakeBrevoResponse("message-3"),
-                FakeBrevoResponse("message-4"),
-            ],
-        ) as send_email:
-            for _ in range(4):
-                self.assertEqual(
-                    process_next_ticket_email(),
-                    TicketDelivery.Status.SENT,
-                )
-        self.assertEqual(send_email.call_count, 4)
-        self.assertEqual(TicketDelivery.objects.filter(status=TicketDelivery.Status.SENT).count(), 4)
-        self.assertEqual(
-            set(TicketDelivery.objects.values_list("provider_message_id", flat=True)),
-            {"message-1", "message-2", "message-3", "message-4"},
-        )
-        sent_payloads = [
-            call.kwargs["json"] for call in send_email.call_args_list
-        ]
-        self.assertEqual(
-            {payload["to"][0]["name"] for payload in sent_payloads},
-            {"Attendee One", "Attendee Two", "Attendee Three", "Attendee Four"},
-        )
-        for payload in sent_payloads:
-            pdf_bytes = base64.b64decode(payload["attachment"][0]["content"])
-            self.assertTrue(pdf_bytes.startswith(b"%PDF-"))
-            self.assertIn(payload["to"][0]["name"], payload["htmlContent"])
+        self.assertEqual(TicketDelivery.objects.count(), 0)
+        self.assertEqual(response.data["delivery_status"], "DISABLED")
 
     def test_combo_requires_a_name_for_each_ticket(self):
         payload = self.registration_payload(self.combo)
@@ -561,311 +539,11 @@ class TicketingApiTests(TestCase):
         )
         self.assertGreaterEqual(response.content.count(b"/Subtype /Image"), 2)
 
-    def test_brevo_webhook_is_authenticated_and_idempotently_marks_delivery(self):
-        response = self.create_online_registration()
-        delivery = TicketDelivery.objects.get(ticket_id=response.data["ticket"]["id"])
-        with patch(
-            "apps.payments.delivery.requests.post",
-            return_value=FakeBrevoResponse("brevo-message-1"),
-        ):
-            self.assertEqual(process_next_ticket_email(), TicketDelivery.Status.SENT)
-        delivery.refresh_from_db()
-        self.assertEqual(delivery.provider_message_id, "brevo-message-1")
 
-        with override_settings(BREVO_WEBHOOK_TOKEN="webhook-test-token"):
-            denied = self.client.post(
-                "/api/v1/payments/brevo/webhook/",
-                {"event": "delivered", "message-id": "brevo-message-1"},
-                format="json",
-            )
-            self.assertEqual(denied.status_code, 403)
-            headers = {"HTTP_X_BREVO_WEBHOOK_TOKEN": "webhook-test-token"}
-            first = self.client.post(
-                "/api/v1/payments/brevo/webhook/",
-                {"event": "delivered", "message-id": "brevo-message-1"},
-                format="json",
-                **headers,
-            )
-            delivery.refresh_from_db()
-            delivered_at = delivery.delivered_at
-            replay = self.client.post(
-                "/api/v1/payments/brevo/webhook/",
-                {"event": "delivered", "message-id": "brevo-message-1"},
-                format="json",
-                **headers,
-            )
 
-        self.assertEqual(first.status_code, 200, first.data)
-        self.assertTrue(first.data["processed"])
-        self.assertEqual(replay.status_code, 200, replay.data)
-        delivery.refresh_from_db()
-        self.assertEqual(delivery.status, TicketDelivery.Status.DELIVERED)
-        self.assertEqual(delivery.delivered_at, delivered_at)
 
-    def test_daily_quota_keeps_staff_slots_reserved_and_regular_limit_strict(self):
-        self.event.capacity = 400
-        self.event.save(update_fields=("capacity",))
-        registration, initial_tickets = create_registration(
-            event_id=self.event.id,
-            tier_id=self.single.id,
-            buyer={
-                "name": "Quota Test Buyer",
-                "email": "quota@example.test",
-                "phone": "+919876543210",
-            },
-            source=Registration.Source.ON_SPOT,
-            created_by=self.registration_staff,
-            attendee_names=["Quota Attendee 0"],
-        )
-        extra_tickets = Ticket.objects.bulk_create(
-            [
-                Ticket(
-                    registration=registration,
-                    ticket_code=(
-                        f"{registration.registration_code}-T{index + 1:02d}"
-                    ),
-                    attendee_name=f"Quota Attendee {index}",
-                )
-                for index in range(1, 310)
-            ]
-        )
-        from apps.payments.delivery import ensure_ticket_deliveries
 
-        ensure_ticket_deliveries(registration, extra_tickets)
-        TicketDelivery.objects.filter(
-            ticket__registration=registration,
-            ticket__attendee_name__in=[
-                f"Quota Attendee {index}" for index in range(5)
-            ],
-        ).update(priority=TicketDelivery.Priority.STAFF)
-        TicketDelivery.objects.filter(
-            ticket__registration=registration,
-            ticket__attendee_name__in=[
-                f"Quota Attendee {index}" for index in range(5, 10)
-            ],
-        ).update(priority=TicketDelivery.Priority.COMPLIMENTARY)
 
-        def accepted(*args, **kwargs):
-            return FakeBrevoResponse(str(uuid.uuid4()))
-
-        with (
-            patch("apps.payments.delivery.generate_tickets_pdf", return_value=b"%PDF-test"),
-            patch("apps.payments.delivery.requests.post", side_effect=accepted) as send_email,
-        ):
-            for _ in range(300):
-                self.assertEqual(
-                    process_next_ticket_email(),
-                    TicketDelivery.Status.SENT,
-                )
-            self.assertIsNone(process_next_ticket_email())
-
-        usage = EmailDailyUsage.objects.get()
-        self.assertEqual(send_email.call_count, 300)
-        self.assertEqual(usage.regular_sent, 295)
-        self.assertEqual(usage.priority_sent, 5)
-        self.assertEqual(usage.regular_slots_used, 295)
-        self.assertEqual(usage.priority_slots_used, 5)
-        self.assertEqual(
-            TicketDelivery.objects.filter(status=TicketDelivery.Status.SENT).count(),
-            300,
-        )
-        self.assertEqual(
-            TicketDelivery.objects.filter(
-                status=TicketDelivery.Status.PENDING,
-                priority=TicketDelivery.Priority.REGULAR,
-            ).count(),
-            5,
-        )
-        self.assertEqual(
-            TicketDelivery.objects.filter(
-                status=TicketDelivery.Status.PENDING,
-                priority__in=(
-                    TicketDelivery.Priority.STAFF,
-                    TicketDelivery.Priority.COMPLIMENTARY,
-                ),
-            ).count(),
-            5,
-        )
-        self.assertEqual(len(initial_tickets), 1)
-        next_day = usage.date + timedelta(days=1)
-        with (
-            patch("apps.payments.delivery.timezone.localdate", return_value=next_day),
-            patch(
-                "apps.payments.delivery.generate_tickets_pdf",
-                return_value=b"%PDF-test",
-            ),
-            patch(
-                "apps.payments.delivery.requests.post",
-                return_value=FakeBrevoResponse(str(uuid.uuid4())),
-            ),
-        ):
-            self.assertEqual(
-                process_next_ticket_email(),
-                TicketDelivery.Status.SENT,
-            )
-        next_day_usage = EmailDailyUsage.objects.get(date=next_day)
-        self.assertEqual(next_day_usage.regular_sent, 0)
-        self.assertEqual(next_day_usage.priority_sent, 1)
-
-    def test_email_failure_keeps_ticket_valid_and_can_be_retried(self):
-        order = self.payment_order(self.registration_payload(), uuid.uuid4())
-        verified = self.verify_order(order.data["order_id"])
-        self.assertEqual(verified.status_code, 200)
-        self.assertEqual(verified.data["delivery_status"], TicketDelivery.Status.PENDING)
-        self.assertEqual(Ticket.objects.count(), 1)
-        delivery = TicketDelivery.objects.get()
-        self.assertEqual(delivery.attempt_count, 0)
-        with (
-            patch(
-                "apps.payments.delivery.generate_tickets_pdf",
-                return_value=b"%PDF-ticket",
-            ) as render_pdf,
-            patch(
-                "apps.payments.delivery.requests.post",
-                return_value=FakeBrevoResponse("message-failed", status_code=400),
-            ),
-        ):
-            self.assertEqual(process_next_ticket_email(), TicketDelivery.Status.FAILED)
-        delivery.refresh_from_db()
-        self.assertIn("HTTP 400", delivery.failure_reason)
-        with patch(
-            "apps.payments.delivery.requests.post",
-            return_value=FakeBrevoResponse("message-retry"),
-        ):
-            self.client.force_authenticate(self.admin)
-            retried = self.client.post(
-                f"/api/v1/payments/delivery/{delivery.id}/retry/",
-                {},
-                format="json",
-            )
-            sent = process_next_ticket_email()
-        self.assertEqual(retried.status_code, 202)
-        self.assertEqual(sent, TicketDelivery.Status.SENT)
-        delivery.refresh_from_db()
-        self.assertEqual(delivery.status, TicketDelivery.Status.SENT)
-        self.assertEqual(delivery.attempt_count, 2)
-        self.assertEqual(delivery.pdf_content, b"%PDF-ticket")
-        self.assertEqual(render_pdf.call_count, 1)
-        self.assertEqual(Ticket.objects.count(), 1)
-
-    def test_ambiguous_brevo_timeout_requires_reconciliation(self):
-        response = self.create_online_registration()
-        self.assertEqual(response.status_code, 200, response.data)
-        delivery = TicketDelivery.objects.get()
-        with (
-            patch(
-                "apps.payments.delivery.generate_tickets_pdf",
-                return_value=b"%PDF-ticket",
-            ),
-            patch(
-                "apps.payments.delivery.requests.post",
-                side_effect=requests.Timeout("provider timed out"),
-            ) as send_email,
-        ):
-            self.assertEqual(
-                process_next_ticket_email(),
-                TicketDelivery.Status.RECONCILIATION_REQUIRED,
-            )
-            self.assertIsNone(process_next_ticket_email())
-        delivery.refresh_from_db()
-        self.assertEqual(delivery.status, TicketDelivery.Status.RECONCILIATION_REQUIRED)
-        self.assertTrue(delivery.quota_reserved)
-        self.assertEqual(delivery.pdf_content, b"%PDF-ticket")
-        self.assertEqual(send_email.call_count, 1)
-        self.assertEqual(Ticket.objects.get().status, Ticket.Status.ISSUED)
-        self.client.force_authenticate(self.admin)
-        retry = self.client.post(
-            f"/api/v1/payments/delivery/{delivery.id}/retry/",
-            {},
-            format="json",
-        )
-        self.assertEqual(retry.status_code, 400)
-
-    def test_ambiguous_brevo_5xx_requires_reconciliation(self):
-        response = self.create_online_registration()
-        self.assertEqual(response.status_code, 200, response.data)
-        delivery = TicketDelivery.objects.get()
-        with (
-            patch(
-                "apps.payments.delivery.generate_tickets_pdf",
-                return_value=b"%PDF-ticket",
-            ),
-            patch(
-                "apps.payments.delivery.requests.post",
-                return_value=FakeBrevoResponse("unknown", status_code=503),
-            ) as send_email,
-        ):
-            self.assertEqual(
-                process_next_ticket_email(),
-                TicketDelivery.Status.RECONCILIATION_REQUIRED,
-            )
-            self.assertIsNone(process_next_ticket_email())
-        delivery.refresh_from_db()
-        self.assertEqual(delivery.status, TicketDelivery.Status.RECONCILIATION_REQUIRED)
-        self.assertTrue(delivery.quota_reserved)
-        self.assertEqual(send_email.call_count, 1)
-
-    def test_abandoned_worker_claim_is_reconciled_after_restart(self):
-        response = self.create_online_registration()
-        self.assertEqual(response.status_code, 200, response.data)
-        delivery = TicketDelivery.objects.get()
-        usage = EmailDailyUsage.objects.create(
-            date=timezone.localdate(),
-            regular_slots_used=1,
-        )
-        delivery.status = TicketDelivery.Status.SENDING
-        delivery.quota_date = usage.date
-        delivery.quota_reserved = True
-        delivery.claim_token = uuid.uuid4()
-        delivery.attempt_count = 1
-        delivery.last_attempt_at = timezone.now() - timedelta(minutes=6)
-        delivery.save()
-        with patch("apps.payments.delivery.requests.post") as send_email:
-            self.assertIsNone(process_next_ticket_email())
-        delivery.refresh_from_db()
-        usage.refresh_from_db()
-        self.assertEqual(delivery.status, TicketDelivery.Status.RECONCILIATION_REQUIRED)
-        self.assertTrue(delivery.quota_reserved)
-        self.assertEqual(usage.regular_slots_used, 1)
-        send_email.assert_not_called()
-        self.assertEqual(Ticket.objects.get().status, Ticket.Status.ISSUED)
-
-    def test_pdf_failure_does_not_reverse_payment_and_delivery_is_retryable(self):
-        order = self.payment_order(self.registration_payload(), uuid.uuid4())
-        with patch(
-            "apps.payments.delivery.generate_tickets_pdf",
-            side_effect=ValueError("PDF renderer unavailable"),
-        ):
-            verified = self.verify_order(order.data["order_id"])
-        self.assertEqual(verified.status_code, 200)
-        self.assertEqual(Ticket.objects.count(), 1)
-        self.assertEqual(
-            Payment.objects.get().verification_status,
-            Payment.VerificationStatus.VERIFIED,
-        )
-        delivery = TicketDelivery.objects.get()
-        self.assertEqual(delivery.status, TicketDelivery.Status.PENDING)
-        self.client.force_authenticate(self.admin)
-        with patch(
-            "apps.payments.delivery.generate_tickets_pdf",
-            side_effect=ValueError("PDF renderer unavailable"),
-        ):
-            self.assertEqual(
-                process_next_ticket_email(),
-                TicketDelivery.Status.FAILED,
-            )
-        retried = self.client.post(
-            f"/api/v1/payments/delivery/{delivery.id}/retry/",
-            {},
-            format="json",
-        )
-        self.assertEqual(retried.status_code, 202)
-        with patch(
-            "apps.payments.delivery.requests.post",
-            return_value=FakeBrevoResponse("message-retry"),
-        ):
-            self.assertEqual(process_next_ticket_email(), TicketDelivery.Status.SENT)
-        self.assertEqual(Ticket.objects.count(), 1)
 
     def test_repeated_email_and_phone_are_allowed(self):
         first = self.create_online_registration()
@@ -896,33 +574,8 @@ class TicketingApiTests(TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertEqual(Ticket.objects.exclude(status=Ticket.Status.CANCELLED).count(), 4)
 
-    def test_on_spot_registration_requires_staff_and_uses_same_ticket_model(self):
-        payload = self.registration_payload(self.combo)
-        payload["attendee_names"] = ["A One", "B Two", "C Three", "D Four"]
-        denied = self.client.post("/api/v1/registrations/on-spot/", payload, format="json")
-        self.assertEqual(denied.status_code, 401)
 
-        self.client.force_authenticate(self.registration_staff)
-        key = str(uuid.uuid4())
-        response = self.client.post(
-            "/api/v1/registrations/on-spot/",
-            payload,
-            format="json",
-            HTTP_IDEMPOTENCY_KEY=key,
-        )
-        self.assertEqual(response.status_code, 201, response.data)
-        self.assertEqual(response.data["registration"]["source"], Registration.Source.ON_SPOT)
-        self.assertEqual(len(response.data["tickets"]), 4)
-        replay = self.client.post(
-            "/api/v1/registrations/on-spot/",
-            payload,
-            format="json",
-            HTTP_IDEMPOTENCY_KEY=key,
-        )
-        self.assertEqual(replay.status_code, 200, replay.data)
-        self.assertEqual(replay.data["registration"]["id"], response.data["registration"]["id"])
-        self.assertEqual(Registration.objects.count(), 1)
-        self.assertEqual(Ticket.objects.count(), 4)
+
 
     def test_closed_event_and_wrong_tier_are_rejected(self):
         other_event = Event.objects.create(
@@ -1029,7 +682,7 @@ class TicketingApiTests(TestCase):
         me = client.get("/api/v1/auth/me/")
         self.assertEqual(me.status_code, 200)
         denied = client.post("/api/v1/registrations/on-spot/", self.registration_payload(), format="json")
-        self.assertEqual(denied.status_code, 403)
+        self.assertEqual(denied.status_code, 404)
         csrf_token = client.get("/api/v1/auth/csrf/").data["csrfToken"]
         logout_response = client.post(
             "/api/v1/auth/logout/",
@@ -1093,8 +746,26 @@ class TicketingApiTests(TestCase):
 
     def test_dashboard_aggregates_are_database_backed(self):
         registration_response = self.create_online_registration(self.combo)
-        self.approve_ticket_email_for_test(
-            registration_response.data["registration"]["id"]
+        self.assertEqual(registration_response.status_code, 200)
+        payment = Payment.objects.get(
+            intent__registration_id=registration_response.data["registration"]["id"]
+        )
+        payment.provider = Payment.Provider.UPI_MANUAL
+        payment.status = Payment.Status.VERIFIED
+        payment.verification_status = Payment.VerificationStatus.VERIFIED
+        payment.ticket_issuance_status = Payment.TicketIssuanceStatus.ISSUED
+        payment.verified_by = self.admin
+        payment.verified_at = timezone.now()
+        payment.save(
+            update_fields=(
+                "provider",
+                "status",
+                "verification_status",
+                "ticket_issuance_status",
+                "verified_by",
+                "verified_at",
+                "updated_at",
+            )
         )
         self.client.force_authenticate(self.admin)
         response = self.client.get(f"/api/v1/reports/dashboard/?event_id={self.event.id}")

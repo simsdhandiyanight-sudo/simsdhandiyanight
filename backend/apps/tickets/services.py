@@ -27,6 +27,9 @@ def cancel_ticket(ticket_id, actor):
     ticket.status = Ticket.Status.CANCELLED
     ticket.cancelled_at = timezone.now()
     ticket.save(update_fields=("status", "cancelled_at", "updated_at"))
+    from apps.payments.sheets import request_ticket_sheet_sync
+
+    request_ticket_sheet_sync(ticket)
     AuditLog.objects.create(
         actor=actor,
         action="TICKET_CANCELLED",

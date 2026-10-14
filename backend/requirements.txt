@@ -2,6 +2,7 @@ Django>=5.2,<5.3
 cloudinary>=1.44,<2
 django-cors-headers>=4.7,<5
 djangorestframework>=3.16,<3.17
+google-auth>=2.40,<3
 gunicorn>=23,<24
 Pillow>=11,<13
 setuptools>=70,<81

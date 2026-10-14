@@ -209,14 +209,6 @@ export const StaffDashboardPage: React.FC = () => {
             </Link>
 
             <Link
-              to="/staff/register"
-              className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 rounded-xl text-xs font-semibold inline-flex items-center gap-2 transition-all cursor-pointer"
-            >
-              <UserPlus className="w-4 h-4 text-indigo-400" />
-              <span>ON_SPOT KIOSK</span>
-            </Link>
-
-            <Link
               to="/admin"
               className="px-3.5 py-2.5 text-xs text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-colors"
             >
@@ -267,13 +259,13 @@ export const StaffDashboardPage: React.FC = () => {
 
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
             <span className="text-[11px] font-semibold text-indigo-400 uppercase tracking-wider block mb-1">
-              On-Spot Venue Desk
+              Historical On-Spot Tickets
             </span>
             <div className="text-2xl sm:text-3xl font-extrabold text-indigo-300 font-mono tabular-nums">
               {sourceMetricsAvailable ? onSpotCount.toLocaleString() : '—'}
             </div>
             <div className="text-xs text-slate-500 mt-1 font-mono">
-              Issued at kiosk desk
+              Existing on-spot registrations
             </div>
           </div>
         </div>

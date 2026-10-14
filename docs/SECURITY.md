@@ -72,7 +72,7 @@ Protected operations include:
 
 - Admin operations
 - Staff operations
-- On-spot registration
+- Historical on-spot registration lookup
 - Ticket search
 - Ticket management
 - QR scanning
@@ -141,10 +141,8 @@ Can:
 ## REGISTRATION_STAFF
 Can:
 
-- Create on-spot registrations
 - View permitted registrations
-- Search permitted tickets
-- Generate/display tickets
+- View historical on-spot registrations and tickets as permitted
 
 Cannot:
 
@@ -466,20 +464,11 @@ If a ticket has already been successfully used, subsequent requests must not gra
 
 ---
 
-# 17. On-Spot Registration Security
-On-spot registration must require an authorized staff account.
-
-The server must determine:
-
-```
-Authenticated User
-        ↓
-Registration Staff?
-        ↓
-Allowed
-```
-
-A normal public user must not be able to call the staff-only on-spot registration endpoint simply by knowing its URL.
+# 17. On-Spot Registration
+Creation of new on-spot registrations is disabled; no public or staff creation
+endpoint is registered. Historical registrations, tickets, and scans remain
+available only through their existing authorized lookup, reporting, and entry
+operations.
 
 ---
 

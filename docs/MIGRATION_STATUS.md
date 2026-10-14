@@ -62,10 +62,6 @@ The frontend has been successfully migrated from local DataStore and mock data t
   - Already migrated (previous checkpoint)
   - Uses `ticketsApi.getPage()` with pagination
 
-- ✅ **AdminScansPage** (`client/src/pages/admin/AdminScansPage.tsx`)
-  - Already migrated (previous checkpoint)
-  - Uses `scansApi.getPage()` with filtering
-
 - ✅ **AdminReportsPage** (`client/src/pages/admin/AdminReportsPage.tsx`)
   - Migrated in this phase
   - Uses `eventsApi.getById()` for event details

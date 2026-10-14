@@ -18,14 +18,11 @@ const TicketComingSoonPage = lazy(() => import('./pages/public/TicketComingSoonP
 const AboutPage = lazy(() => import('./pages/public/AboutPage').then((module) => ({ default: module.AboutPage })));
 const StaffLoginPage = lazy(() => import('./pages/staff/StaffLoginPage').then((module) => ({ default: module.StaffLoginPage })));
 const StaffDashboardPage = lazy(() => import('./pages/staff/StaffDashboardPage').then((module) => ({ default: module.StaffDashboardPage })));
-const OnSpotRegistrationPage = lazy(() => import('./pages/staff/OnSpotRegistrationPage').then((module) => ({ default: module.OnSpotRegistrationPage })));
 const StaffScannerPage = lazy(() => import('./pages/staff/StaffScannerPage').then((module) => ({ default: module.StaffScannerPage })));
 const AdminDashboardPage = lazy(() => import('./pages/admin/AdminDashboardPage').then((module) => ({ default: module.AdminDashboardPage })));
 const AdminRegistrationsPage = lazy(() => import('./pages/admin/AdminRegistrationsPage').then((module) => ({ default: module.AdminRegistrationsPage })));
 const AdminTicketsPage = lazy(() => import('./pages/admin/AdminTicketsPage').then((module) => ({ default: module.AdminTicketsPage })));
-const AdminScansPage = lazy(() => import('./pages/admin/AdminScansPage').then((module) => ({ default: module.AdminScansPage })));
 const AdminReportsPage = lazy(() => import('./pages/admin/AdminReportsPage').then((module) => ({ default: module.AdminReportsPage })));
-const AdminEmailDeliveryPage = lazy(() => import('./pages/admin/AdminEmailDeliveryPage'));
 const AdminPaymentReviewPage = lazy(() => import('./pages/admin/AdminPaymentReviewPage'));
 
 const PageLoading: React.FC = () => (
@@ -51,7 +48,7 @@ const ProtectedRoute: React.FC<{
     const roleHome = user.role === 'ADMIN'
       ? '/admin'
       : user.role === 'REGISTRATION'
-        ? '/staff/register'
+        ? '/admin/registrations'
         : '/staff/scanner';
     return <Navigate to={roleHome} replace />;
   }
@@ -80,20 +77,19 @@ export default function App() {
             {/* Staff Routes */}
             <Route path="/staff/login" element={<StaffLoginPage />} />
             <Route path="/staff/dashboard" element={<ProtectedRoute allowedRoles={['ADMIN']}><StaffDashboardPage /></ProtectedRoute>} />
-            <Route path="/staff/register" element={<ProtectedRoute allowedRoles={['ADMIN', 'REGISTRATION']}><OnSpotRegistrationPage /></ProtectedRoute>} />
             <Route path="/staff/scanner" element={<ProtectedRoute allowedRoles={['ADMIN', 'SCANNER']}><StaffScannerPage /></ProtectedRoute>} />
             <Route path="/staff/scanner/result" element={<ProtectedRoute allowedRoles={['ADMIN', 'SCANNER']}><StaffScannerPage /></ProtectedRoute>} />
 
             {/* Admin Routes */}
             <Route path="/admin" element={<ProtectedRoute allowedRoles={['ADMIN']}><AdminDashboardPage /></ProtectedRoute>} />
             <Route path="/admin/events" element={<ProtectedRoute allowedRoles={['ADMIN']}><Navigate to="/admin" replace /></ProtectedRoute>} />
-            <Route path="/admin/registrations" element={<ProtectedRoute allowedRoles={['ADMIN']}><AdminRegistrationsPage /></ProtectedRoute>} />
+            <Route path="/admin/registrations" element={<ProtectedRoute allowedRoles={['ADMIN', 'REGISTRATION']}><AdminRegistrationsPage /></ProtectedRoute>} />
             <Route path="/admin/tickets" element={<ProtectedRoute allowedRoles={['ADMIN']}><AdminTicketsPage /></ProtectedRoute>} />
-            <Route path="/admin/scans" element={<ProtectedRoute allowedRoles={['ADMIN']}><AdminScansPage /></ProtectedRoute>} />
             <Route path="/admin/reports" element={<ProtectedRoute allowedRoles={['ADMIN']}><AdminReportsPage /></ProtectedRoute>} />
-            <Route path="/admin/email-delivery" element={<ProtectedRoute allowedRoles={['ADMIN']}><AdminEmailDeliveryPage /></ProtectedRoute>} />
             <Route path="/admin/payment-review" element={<ProtectedRoute allowedRoles={['ADMIN']}><AdminPaymentReviewPage /></ProtectedRoute>} />
             <Route path="/admin/users" element={<ProtectedRoute allowedRoles={['ADMIN']}><Navigate to="/admin" replace /></ProtectedRoute>} />
+            <Route path="/admin/scans" element={<ProtectedRoute allowedRoles={['ADMIN']}><Navigate to="/admin" replace /></ProtectedRoute>} />
+            <Route path="/admin/email-delivery" element={<ProtectedRoute allowedRoles={['ADMIN']}><Navigate to="/admin" replace /></ProtectedRoute>} />
 
             {/* Fallback */}
             <Route path="*" element={<Navigate to="/" replace />} />

@@ -1,15 +1,12 @@
 from django.db.models import Prefetch, Q
 from django.shortcuts import get_object_or_404
 from django.utils.decorators import method_decorator
-from django.views.decorators.csrf import csrf_protect
 from rest_framework import serializers, status
 from rest_framework.exceptions import APIException
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
-from rest_framework.throttling import AnonRateThrottle
 from rest_framework.views import APIView
 
-from apps.accounts.permissions import CanRegisterOnSpot
 from apps.events.models import Event
 from apps.tickets.models import Ticket
 from .models import Registration
@@ -18,7 +15,7 @@ from .serializers import (
     RegistrationListSerializer,
     RegistrationSerializer,
 )
-from .services import create_registration_idempotently
+from apps.payments.models import Payment, TicketSheetSync
 
 
 class PaymentRequired(APIException):
@@ -27,30 +24,12 @@ class PaymentRequired(APIException):
     default_code = "PAYMENT_REQUIRED"
 
 
-def get_idempotency_key(request):
-    raw_key = request.headers.get("Idempotency-Key")
-    if not raw_key:
-        raise serializers.ValidationError(
-            {"Idempotency-Key": "This header is required."}
-        )
-    try:
-        return serializers.UUIDField().run_validation(raw_key)
-    except serializers.ValidationError as error:
-        raise serializers.ValidationError(
-            {"Idempotency-Key": "Provide a valid UUID."}
-        ) from error
-
-
 class RegistrationListCreateView(APIView):
     def get_permissions(self):
         if self.request.method == "POST":
             return [AllowAny()]
         return [IsAuthenticated()]
 
-    def get_throttles(self):
-        return [AnonRateThrottle()] if self.request.method == "POST" else []
-
-    @method_decorator(csrf_protect)
     def post(self, request):
         raise PaymentRequired()
 
@@ -103,32 +82,43 @@ class RegistrationListCreateView(APIView):
             .get(pk=registration.pk)
         )
         data = RegistrationSerializer(registration).data
+        tickets = data["tickets"]
+        sync_statuses = list(
+            TicketSheetSync.objects.filter(ticket__registration=registration)
+            .values_list("status", flat=True)
+        )
+        if not sync_statuses:
+            sheet_sync_status = "NOT_QUEUED"
+        elif TicketSheetSync.Status.FAILED in sync_statuses:
+            sheet_sync_status = TicketSheetSync.Status.FAILED
+        elif any(
+            status != TicketSheetSync.Status.SYNCED for status in sync_statuses
+        ):
+            sheet_sync_status = TicketSheetSync.Status.PENDING
+        else:
+            sheet_sync_status = TicketSheetSync.Status.SYNCED
+        payment = Payment.objects.filter(intent__registration=registration).first()
+        ticket_issuance_status = (
+            payment.ticket_issuance_status if payment else "ISSUED"
+        )
         response = Response(
-            {"registration": data, "ticket": data["tickets"][0], "tickets": data["tickets"]},
-            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+            {
+                "registration": data,
+                "ticket": tickets[0] if tickets else None,
+                "tickets": tickets,
+                "sheet_sync_status": sheet_sync_status,
+                "ticket_issuance_status": ticket_issuance_status,
+            },
+            status=(
+                status.HTTP_202_ACCEPTED
+                if not tickets
+                else status.HTTP_201_CREATED
+                if created
+                else status.HTTP_200_OK
+            ),
         )
         response["Idempotency-Replayed"] = "false" if created else "true"
         return response
-
-
-class OnSpotRegistrationView(APIView):
-    permission_classes = [CanRegisterOnSpot]
-
-    @method_decorator(csrf_protect)
-    def post(self, request):
-        serializer = CreateRegistrationSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        registration, _tickets, created = create_registration_idempotently(
-            idempotency_key=get_idempotency_key(request),
-            event_id=serializer.validated_data["event_id"],
-            tier_id=serializer.validated_data["ticket_tier_id"],
-            buyer=serializer.validated_data["buyer"],
-            source=Registration.Source.ON_SPOT,
-            created_by=request.user,
-            attendee_names=serializer.validated_data.get("attendee_names"),
-        )
-        response_view = RegistrationListCreateView()
-        return response_view._created_response(registration, created=created)
 
 
 class RegistrationDetailView(APIView):

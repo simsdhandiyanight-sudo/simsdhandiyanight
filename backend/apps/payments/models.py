@@ -26,6 +26,7 @@ class PaymentIntent(models.Model):
     buyer_organization = models.CharField(max_length=200, blank=True)
     buyer_job_title = models.CharField(max_length=120, blank=True)
     attendee_names = models.JSONField(default=list)
+    quantity = models.PositiveIntegerField(default=1)
     status = models.CharField(max_length=24, choices=Status.choices, default=Status.PENDING)
     registration = models.OneToOneField(
         "registrations.Registration",
@@ -55,6 +56,7 @@ class Payment(models.Model):
         RAZORPAY = "RAZORPAY", "Razorpay (legacy)"
         PAYU = "PAYU", "PayU"
         UPI_MANUAL = "UPI_MANUAL", "Manual UPI verification"
+        ON_SPOT = "ON_SPOT", "On-spot operator verification"
 
     class Status(models.TextChoices):
         CREATING = "CREATING", "Creating order"
@@ -152,7 +154,13 @@ class Payment(models.Model):
     rejection_deadline = models.DateTimeField(null=True, blank=True)
     rejection_email_status = models.CharField(
         max_length=12,
-        choices=(("PENDING", "Pending"), ("SENT", "Sent"), ("FAILED", "Failed")),
+        choices=(
+            ("PENDING", "Pending"),
+            ("SENDING", "Sending"),
+            ("SENT", "Sent"),
+            ("FAILED", "Failed"),
+            ("UNKNOWN", "Outcome unknown"),
+        ),
         blank=True,
     )
     created_at = models.DateTimeField(auto_now_add=True)
@@ -317,6 +325,15 @@ class TicketDelivery(models.Model):
         "tickets.Ticket",
         on_delete=models.PROTECT,
         related_name="email_delivery",
+        null=True,
+        blank=True,
+    )
+    college_ticket = models.OneToOneField(
+        "tickets.CollegeStudentTicket",
+        on_delete=models.PROTECT,
+        related_name="email_delivery",
+        null=True,
+        blank=True,
     )
     recipient = models.EmailField()
     priority = models.CharField(
@@ -332,6 +349,7 @@ class TicketDelivery(models.Model):
     quota_date = models.DateField(null=True, blank=True)
     quota_reserved = models.BooleanField(default=False)
     claim_token = models.UUIDField(null=True, blank=True)
+    lease_expires_at = models.DateTimeField(null=True, blank=True)
     retry_after = models.DateTimeField(null=True, blank=True)
     last_attempt_at = models.DateTimeField(null=True, blank=True)
     sent_at = models.DateTimeField(null=True, blank=True)
@@ -344,6 +362,69 @@ class TicketDelivery(models.Model):
         indexes = [
             models.Index(fields=("status", "priority", "created_at")),
             models.Index(fields=("retry_after", "status")),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(ticket__isnull=False, college_ticket__isnull=True)
+                    | models.Q(ticket__isnull=True, college_ticket__isnull=False)
+                ),
+                name="ticket_delivery_exactly_one_ticket_source",
+            ),
+        ]
+
+
+class TicketSheetSync(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "PENDING", "Pending"
+        PROCESSING = "PROCESSING", "Processing"
+        SYNCED = "SYNCED", "Synced"
+        FAILED = "FAILED", "Failed"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    ticket = models.OneToOneField(
+        "tickets.Ticket",
+        on_delete=models.PROTECT,
+        related_name="sheet_sync",
+        null=True,
+        blank=True,
+    )
+    college_ticket = models.OneToOneField(
+        "tickets.CollegeStudentTicket",
+        on_delete=models.PROTECT,
+        related_name="sheet_sync",
+        null=True,
+        blank=True,
+    )
+    status = models.CharField(
+        max_length=12,
+        choices=Status.choices,
+        default=Status.PENDING,
+    )
+    attempt_count = models.PositiveSmallIntegerField(default=0)
+    failure_reason = models.CharField(max_length=500, blank=True)
+    resync_requested = models.BooleanField(default=False)
+    retry_after = models.DateTimeField(null=True, blank=True)
+    last_attempt_at = models.DateTimeField(null=True, blank=True)
+    lease_expires_at = models.DateTimeField(null=True, blank=True)
+    failed_at = models.DateTimeField(null=True, blank=True)
+    synced_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=("status", "retry_after", "created_at")),
+            models.Index(fields=("status", "lease_expires_at")),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(ticket__isnull=False, college_ticket__isnull=True)
+                    | models.Q(ticket__isnull=True, college_ticket__isnull=False)
+                ),
+                name="sheet_sync_exactly_one_ticket_source",
+            ),
         ]
 
 

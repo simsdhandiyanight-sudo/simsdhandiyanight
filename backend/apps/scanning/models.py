@@ -44,6 +44,13 @@ class TicketScan(models.Model):
         blank=True,
         related_name="scan_history",
     )
+    college_ticket = models.ForeignKey(
+        "tickets.CollegeStudentTicket",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="scan_history",
+    )
     event = models.ForeignKey("events.Event", on_delete=models.PROTECT, related_name="scans")
     gate = models.ForeignKey(Gate, on_delete=models.PROTECT, related_name="scans")
     scanned_by = models.ForeignKey("accounts.User", on_delete=models.PROTECT, related_name="ticket_scans")
@@ -63,5 +70,17 @@ class TicketScan(models.Model):
                 fields=("ticket",),
                 condition=models.Q(result="ENTRY_GRANTED"),
                 name="ticket_has_at_most_one_granted_scan",
-            )
+            ),
+            models.UniqueConstraint(
+                fields=("college_ticket",),
+                condition=models.Q(result="ENTRY_GRANTED"),
+                name="college_ticket_has_at_most_one_granted_scan",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(ticket__isnull=True)
+                    | models.Q(college_ticket__isnull=True)
+                ),
+                name="ticket_scan_at_most_one_ticket_source",
+            ),
         ]

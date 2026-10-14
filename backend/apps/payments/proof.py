@@ -73,9 +73,9 @@ def validate_payment_proof_image(upload):
     return content_type
 
 
-def _payment_instructions(tier):
+def _payment_instructions(tier, quantity=1):
     return {
-        "amount": float(tier.price),
+        "amount": float(tier.price * quantity),
         "currency": tier.currency,
         "reservation_hours": settings.PAYMENT_PROOF_RESERVATION_HOURS,
     }
@@ -86,6 +86,7 @@ def start_payment_proof_registration(
     idempotency_key,
     event_id,
     tier_id,
+    quantity,
     buyer,
     attendee_names,
 ):
@@ -95,6 +96,7 @@ def start_payment_proof_registration(
         tier_id=tier_id,
         buyer=buyer,
         attendee_names=attendee_names,
+        quantity=quantity,
     )
     reservation = registration.inventory_reservation
     return {
@@ -111,7 +113,7 @@ def start_payment_proof_registration(
             reservation.expires_at.isoformat() if reservation.expires_at else None
         ),
         "rejection_deadline": None,
-        **_payment_instructions(registration.ticket_tier),
+        **_payment_instructions(registration.ticket_tier, intent.quantity),
         "replayed": not created,
     }
 
@@ -134,7 +136,8 @@ def _proof_result(payment):
             if payment.rejection_deadline
             else None
         ),
-        "rejection_email_status": payment.rejection_email_status,
+        "rejection_email_status": "DISABLED",
+        "email_status": "DISABLED",
     }
 
 
@@ -272,7 +275,7 @@ def _submit_payment_proof_transaction(
                 "The 12-hour correction window has expired. Please contact the event team."
             )
 
-    amount = int(registration.ticket_tier.price * 100)
+    amount = int(registration.ticket_tier.price * intent.quantity * 100)
     screenshot.seek(0)
     cloudinary_asset = upload_payment_proof(
         screenshot,
@@ -390,46 +393,24 @@ def get_payment_proof_status(*, registration_id, proof_access_token):
             and latest_payment.rejection_deadline
             and latest_payment.rejection_deadline > timezone.now()
         )
-    email_status = ""
-    if latest_payment and latest_payment.status == Payment.Status.VERIFIED:
-        from .models import TicketDelivery
-
-        delivery_statuses = list(
-            TicketDelivery.objects.filter(
-                ticket__registration=registration,
-            ).values_list("status", flat=True)
-        )
-        if delivery_statuses and all(
-            status in (
-                TicketDelivery.Status.SENT,
-                TicketDelivery.Status.DELIVERED,
-            )
-            for status in delivery_statuses
-        ):
-            email_status = "SENT"
-        elif any(
-            status in (
-                TicketDelivery.Status.FAILED,
-                TicketDelivery.Status.RECONCILIATION_REQUIRED,
-            )
-            for status in delivery_statuses
-        ):
-            email_status = "FAILED"
-        else:
-            email_status = "PENDING"
-    instructions = _payment_instructions(registration.ticket_tier)
+    instructions = _payment_instructions(
+        registration.ticket_tier,
+        intent.quantity,
+    )
     result = {
         "registration_id": str(registration.pk),
         "registration_code": registration.registration_code,
         "ticket_id": registration.ticket_id,
         "registration_status": registration.status,
         "can_submit_proof": can_submit_proof,
-        "email_status": email_status,
+        "email_status": "DISABLED",
         "event_name": registration.event.name,
         "applicant_name": registration.buyer_name,
         "applicant_email": registration.buyer_email,
         "ticket_tier_name": registration.ticket_tier.name,
-        "amount": float(registration.ticket_tier.price),
+        "amount": float(
+            registration.ticket_tier.price * intent.quantity
+        ),
         "currency": registration.ticket_tier.currency,
         "reservation_expires_at": (
             reservation.expires_at.isoformat()
@@ -450,8 +431,8 @@ def get_payment_proof_status(*, registration_id, proof_access_token):
                 "submitted_at": None,
                 "rejection_reason": "",
                 "rejection_deadline": None,
-                "rejection_email_status": "",
-                "email_status": "",
+                "rejection_email_status": "DISABLED",
+                "email_status": "DISABLED",
             }
         )
     return result
@@ -508,7 +489,7 @@ def get_manual_payment_proof_dashboard():
                 else None
             ),
             "rejected_at": payment.rejected_at.isoformat() if payment.rejected_at else None,
-            "rejection_email_status": payment.rejection_email_status,
+            "rejection_email_status": "DISABLED",
         }
         for payment in payments
     ]
@@ -562,7 +543,10 @@ def approve_manual_payment(*, payment_id, administrator, confirmed_received):
         payment.proof_cloudinary_public_id or payment.proof_screenshot is not None
     ):
         raise PaymentProofConflict("A complete payment proof is required before approval.")
-    if payment.amount != int(registration.ticket_tier.price * 100):
+    expected_amount = int(
+        registration.ticket_tier.price * intent.quantity * 100
+    )
+    if payment.amount != expected_amount:
         raise PaymentProofConflict("The submitted amount does not match the expected ticket fee.")
 
     now = timezone.now()
@@ -591,6 +575,7 @@ def approve_manual_payment(*, payment_id, administrator, confirmed_received):
     tickets = issue_registration_tickets(
         registration=registration,
         attendee_names=intent.attendee_names,
+        quantity=intent.quantity,
     )
     if len(tickets) != reservation.units_reserved:
         raise PaymentProofConflict("Ticket count does not match the reserved inventory.")
@@ -611,6 +596,9 @@ def approve_manual_payment(*, payment_id, administrator, confirmed_received):
             "updated_at",
         )
     )
+    from .sheets import ensure_ticket_sheet_syncs
+
+    ensure_ticket_sheet_syncs(registration, tickets)
 
     PaymentProofDecision.objects.create(
         payment=payment,
@@ -652,7 +640,7 @@ def approve_manual_payment(*, payment_id, administrator, confirmed_received):
         "registration_status": registration.status,
         "ticket_id": registration.ticket_id,
         "ticket_count": len(tickets),
-        "email_status": "PENDING",
+        "email_status": "DISABLED",
         "replayed": False,
     }
 
@@ -694,7 +682,6 @@ def reject_manual_payment(*, payment_id, administrator, reason):
         payment.rejected_at = now
         payment.rejection_reason = reason[:1000]
         payment.rejection_deadline = deadline
-        payment.rejection_email_status = "PENDING"
         payment.save(
             update_fields=(
                 "status",
@@ -702,7 +689,6 @@ def reject_manual_payment(*, payment_id, administrator, reason):
                 "rejected_at",
                 "rejection_reason",
                 "rejection_deadline",
-                "rejection_email_status",
                 "updated_at",
             )
         )
@@ -738,40 +724,13 @@ def reject_manual_payment(*, payment_id, administrator, reason):
             },
         )
 
-    from .delivery import send_payment_rejection_email
-
-    email_status = send_payment_rejection_email(payment.pk)
     return {
         "payment_status": Payment.Status.REJECTED,
         "registration_status": Registration.Status.REJECTED,
         "ticket_id": registration.ticket_id,
         "rejection_deadline": deadline.isoformat(),
-        "rejection_email_status": email_status,
+        "rejection_email_status": "DISABLED",
     }
-
-
-def retry_payment_rejection_email(*, payment_id):
-    payment = Payment.objects.filter(
-        pk=payment_id,
-        provider=Payment.Provider.UPI_MANUAL,
-        status=Payment.Status.REJECTED,
-        rejection_email_status="FAILED",
-    ).first()
-    if payment is None:
-        raise PaymentProofConflict("Only failed rejection emails can be retried.")
-    claimed = Payment.objects.filter(
-        pk=payment.pk,
-        rejection_email_status="FAILED",
-    ).update(
-        rejection_email_status="PENDING",
-        updated_at=timezone.now(),
-    )
-    if not claimed:
-        raise PaymentProofConflict("The rejection email is already being retried.")
-    from .delivery import send_payment_rejection_email
-
-    result = send_payment_rejection_email(payment.pk)
-    return {"payment_id": str(payment.pk), "email_status": result}
 
 
 def expire_payment_proof_reservations(*, now=None, limit=500):

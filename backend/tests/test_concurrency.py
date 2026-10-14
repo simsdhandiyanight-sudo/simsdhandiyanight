@@ -3,7 +3,7 @@ from datetime import timedelta
 import json
 import math
 import time
-from threading import Barrier, Lock
+from threading import Barrier
 from unittest import skipUnless
 from unittest.mock import Mock, patch
 import uuid
@@ -16,22 +16,11 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.events.models import Event, TicketTier
-from apps.payments.delivery import process_next_ticket_email
-from apps.payments.models import EmailDailyUsage, Payment, PaymentIntent, TicketDelivery
+from apps.payments.models import Payment, PaymentIntent, TicketDelivery
 from apps.registrations.models import Registration, RegistrationIdempotency
 from apps.registrations.services import RegistrationConflict, create_registration
 from apps.scanning.models import Gate, StaffAssignment
 from apps.tickets.models import Ticket
-
-
-class FakeBrevoResponse:
-    status_code = 201
-
-    def __init__(self, message_id):
-        self.message_id = message_id
-
-    def json(self):
-        return {"messageId": self.message_id}
 
 
 @skipUnless(connection.vendor == "postgresql", "Concurrency guarantees require PostgreSQL row locks.")
@@ -40,8 +29,7 @@ class FakeBrevoResponse:
     PAYU_MERCHANT_SALT="payu-test-salt",
     PAYU_ENVIRONMENT="test",
     PAYU_FRONTEND_URL="https://tickets.example.test",
-    BREVO_API_KEY="brevo-test-key",
-    BREVO_SENDER_EMAIL="tickets@example.test",
+    DJANGO_INTERNAL_API_KEY="n8n-test-token",
 )
 class PostgreSQLConcurrencyTests(TransactionTestCase):
     reset_sequences = True
@@ -155,6 +143,7 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
             },
             "attendee_names": [name],
         }
+
 
     @staticmethod
     def _tag(index):
@@ -318,7 +307,7 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
                 ticket__registration__event=self.event,
                 status=TicketDelivery.Status.PENDING,
             ).count(),
-            tickets.count(),
+            0,
         )
         client = APIClient()
         client.force_authenticate(self.admin)
@@ -485,7 +474,7 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
             Payment.objects.get().verification_status,
             Payment.VerificationStatus.VERIFIED,
         )
-        self.assertEqual(TicketDelivery.objects.count(), 4)
+        self.assertEqual(TicketDelivery.objects.count(), 0)
         self.assertEqual(
             sum(result["verification_status"] == 200 for result in results),
             request_count,
@@ -564,6 +553,11 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
                 f"{name} Three",
                 f"{name} Four",
             ]
+            if source == "onspot":
+                payload["payment_confirmation"] = {
+                    "payment_received": True,
+                    "payment_method": "CASH",
+                }
             specs.append(
                 {
                     "path": (
@@ -627,11 +621,6 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
                 self.assertEqual(stored_ticket.registration_id, registration.id)
                 self.assertEqual(stored_ticket.token, response_ticket["qr_token"])
 
-    def test_five_on_spot_registrations_concurrently(self):
-        specs = self._five_registration_specs("onspot")
-        results = self._concurrent_requests(specs)
-        self._assert_registration_results("onspot", specs, results)
-        self._assert_database_and_dashboard_consistent()
 
     def test_five_online_registrations_concurrently(self):
         specs = self._five_registration_specs("online")
@@ -662,19 +651,21 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
                         "remote_addr": f"10.{repetition}.{index}.1",
                     }
                 )
-            for source in ("onspot", "online"):
-                batch = self._five_registration_specs(source)
+            for batch_index in range(2):
+                batch = self._five_registration_specs("online")
                 for index, spec in enumerate(batch):
-                    spec["payload"]["buyer"]["name"] += f" {self._tag(repetition)}"
+                    spec["payload"]["buyer"]["name"] += (
+                        f" {self._tag(repetition)} Batch {batch_index}"
+                    )
                     spec["payload"]["buyer"]["email"] = (
-                        f"{source}-{repetition}-{index}@example.test"
+                        f"online-{repetition}-{batch_index}-{index}@example.test"
                     )
                     spec["payload"]["attendee_names"] = [
-                        f"{name} {self._tag(repetition)}"
+                        f"{name} {self._tag(repetition)} Batch {batch_index}"
                         for name in spec["payload"]["attendee_names"]
                     ]
                     spec["remote_addr"] = (
-                        f"10.{repetition}.{index}.{2 if source == 'onspot' else 3}"
+                        f"10.{repetition}.{index}.{batch_index + 2}"
                     )
                 specs.extend(batch)
             results = self._concurrent_requests(specs)
@@ -776,9 +767,8 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
 
     def _mixed_load_specs(self, operation_count):
         scan_count = operation_count // 3
-        onspot_count = operation_count // 3
-        online_count = operation_count // 6
-        duplicate_count = operation_count - scan_count - onspot_count - online_count
+        online_count = operation_count // 3
+        duplicate_count = operation_count - scan_count - online_count
         specs = []
         for index in range(scan_count):
             _, tickets = create_registration(
@@ -798,17 +788,6 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
                     "payload": {"token": tickets[0].token},
                     "user_id": self.scanners[index % len(self.scanners)].id,
                     "remote_addr": f"172.16.{operation_count}.{index + 1}",
-                }
-            )
-        for index in range(onspot_count):
-            name = f"Load Onspot {self._tag(index)}"
-            specs.append(
-                {
-                    "path": "/api/v1/registrations/on-spot/",
-                    "payload": self._request_payload(name, f"load-ons-{operation_count}-{index}@example.test"),
-                    "user_id": self.registration_staff.id,
-                    "idempotency_key": str(uuid.uuid4()),
-                    "remote_addr": f"172.17.{operation_count}.{index + 1}",
                 }
             )
         for index in range(online_count):
@@ -867,7 +846,7 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
         )
         self.assertEqual(
             sum(result.get("order_replayed") is True for result in results),
-            operation_count - scan_count - operation_count // 3 - operation_count // 6,
+            operation_count - scan_count - operation_count // 3,
         )
         self.assertEqual(
             Registration.objects.filter(event=self.event).count(),
@@ -878,16 +857,11 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
             operation_count,
         )
         self.assertEqual(
-            RegistrationIdempotency.objects.count(),
-            operation_count // 3,
+            RegistrationIdempotency.objects.count(), 0
         )
         self.assertEqual(
             PaymentIntent.objects.count(),
-            operation_count // 6
-            + operation_count
-            - scan_count
-            - operation_count // 3
-            - operation_count // 6,
+            operation_count - scan_count,
         )
         self.assertEqual(
             Payment.objects.count(),
@@ -903,114 +877,3 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
 
     def test_fifty_concurrent_mixed_operations(self):
         self._run_mixed_load_test(50)
-
-    def test_concurrent_email_workers_claim_each_delivery_once(self):
-        deliveries_expected = 6
-        for index in range(deliveries_expected):
-            create_registration(
-                event_id=self.event.id,
-                tier_id=self.single.id,
-                buyer={
-                    "name": f"Email Buyer {index}",
-                    "email": f"email-buyer-{index}@example.test",
-                    "phone": "+919876543210",
-                },
-                source=Registration.Source.ON_SPOT,
-                created_by=self.registration_staff,
-                attendee_names=[f"Email Attendee {index}"],
-            )
-
-        barrier = Barrier(deliveries_expected)
-        message_id_lock = Lock()
-        message_counter = iter(range(deliveries_expected))
-
-        def send_email(*args, **kwargs):
-            with message_id_lock:
-                message_id = f"concurrent-email-{next(message_counter)}"
-            return FakeBrevoResponse(message_id)
-
-        def process():
-            connections.close_all()
-            try:
-                barrier.wait(timeout=30)
-                return process_next_ticket_email()
-            finally:
-                connections.close_all()
-
-        with (
-            patch("apps.payments.delivery.generate_tickets_pdf", return_value=b"%PDF-test"),
-            patch("apps.payments.delivery.requests.post", side_effect=send_email),
-            ThreadPoolExecutor(max_workers=deliveries_expected) as executor,
-        ):
-            results = list(executor.map(lambda _: process(), range(deliveries_expected)))
-
-        self.assertEqual(results, [TicketDelivery.Status.SENT] * deliveries_expected)
-        self.assertEqual(
-            TicketDelivery.objects.filter(status=TicketDelivery.Status.SENT).count(),
-            deliveries_expected,
-        )
-        self.assertEqual(
-            TicketDelivery.objects.values("ticket_id").distinct().count(),
-            deliveries_expected,
-        )
-        self.assertEqual(
-            TicketDelivery.objects.values("provider_message_id").distinct().count(),
-            deliveries_expected,
-        )
-
-    def test_concurrent_priority_workers_cannot_exceed_daily_quota(self):
-        deliveries_expected = 7
-        for index in range(deliveries_expected):
-            create_registration(
-                event_id=self.event.id,
-                tier_id=self.single.id,
-                buyer={
-                    "name": f"Priority Buyer {index}",
-                    "email": f"priority-buyer-{index}@example.test",
-                    "phone": "+919876543210",
-                },
-                source=Registration.Source.ON_SPOT,
-                created_by=self.registration_staff,
-                attendee_names=[f"Priority Attendee {index}"],
-            )
-        TicketDelivery.objects.filter(
-            ticket__registration__event=self.event,
-        ).update(priority=TicketDelivery.Priority.STAFF)
-
-        barrier = Barrier(deliveries_expected)
-        message_id_lock = Lock()
-        message_counter = iter(range(deliveries_expected))
-
-        def send_email(*args, **kwargs):
-            with message_id_lock:
-                message_id = f"priority-email-{next(message_counter)}"
-            return FakeBrevoResponse(message_id)
-
-        def process():
-            connections.close_all()
-            try:
-                barrier.wait(timeout=30)
-                return process_next_ticket_email()
-            finally:
-                connections.close_all()
-
-        with (
-            patch("apps.payments.delivery.generate_tickets_pdf", return_value=b"%PDF-test"),
-            patch("apps.payments.delivery.requests.post", side_effect=send_email),
-            ThreadPoolExecutor(max_workers=deliveries_expected) as executor,
-        ):
-            results = list(executor.map(lambda _: process(), range(deliveries_expected)))
-
-        usage = EmailDailyUsage.objects.get()
-        self.assertEqual(results.count(TicketDelivery.Status.SENT), 5)
-        self.assertEqual(results.count(None), 2)
-        self.assertEqual(usage.priority_slots_used, 5)
-        self.assertEqual(usage.priority_sent, 5)
-        self.assertEqual(
-            TicketDelivery.objects.filter(status=TicketDelivery.Status.SENT).count(),
-            5,
-        )
-        self.assertEqual(
-            TicketDelivery.objects.filter(status=TicketDelivery.Status.PENDING).count(),
-            2,
-        )

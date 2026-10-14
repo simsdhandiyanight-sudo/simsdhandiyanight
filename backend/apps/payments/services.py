@@ -10,7 +10,7 @@ from decimal import Decimal, InvalidOperation
 import requests
 from django.conf import settings
 from django.db import IntegrityError, transaction
-from django.db.models import Count, Exists, F, OuterRef, Q
+from django.db.models import Count, Exists, F, OuterRef, Q, Sum
 from django.utils import timezone
 from rest_framework import serializers
 from rest_framework.exceptions import APIException, NotFound
@@ -28,7 +28,6 @@ from .models import (
     Payment,
     PaymentIntent,
     PaymentVerificationAttempt,
-    TicketDelivery,
 )
 
 logger = logging.getLogger(__name__)
@@ -104,7 +103,7 @@ def payu_verification_url():
     )
 
 
-def payment_request_hash(*, event_id, tier_id, buyer, attendee_names):
+def payment_request_hash(*, event_id, tier_id, buyer, attendee_names, quantity=1):
     payload = {
         "event_id": str(event_id),
         "ticket_tier_id": str(tier_id),
@@ -117,6 +116,8 @@ def payment_request_hash(*, event_id, tier_id, buyer, attendee_names):
         },
         "attendee_names": [name.strip() for name in attendee_names],
     }
+    if quantity != 1:
+        payload["quantity"] = quantity
     return hashlib.sha256(
         json.dumps(
             payload,
@@ -222,9 +223,6 @@ def _intent_result(intent, payment, *, replayed):
             .get(pk=intent.registration_id)
         )
         serialized = RegistrationSerializer(registration).data
-        delivery_status = TicketDelivery.objects.filter(
-            ticket__registration_id=registration.id
-        ).order_by("created_at").values_list("status", flat=True).first()
         return {
             "payment_verified": True,
             "payment_status": payment.status,
@@ -233,7 +231,7 @@ def _intent_result(intent, payment, *, replayed):
             "registration": serialized,
             "ticket": serialized["tickets"][0],
             "tickets": serialized["tickets"],
-            "delivery_status": delivery_status,
+            "delivery_status": "DISABLED",
             "replayed": replayed,
         }
     return {
@@ -269,6 +267,7 @@ def create_payment_order(
     idempotency_key,
     event_id,
     tier_id,
+    quantity=1,
     buyer,
     attendee_names,
     success_url,
@@ -282,6 +281,7 @@ def create_payment_order(
         tier_id=tier_id,
         buyer=buyer,
         attendee_names=attendee_names,
+        quantity=quantity,
     )
 
     with transaction.atomic():
@@ -299,11 +299,12 @@ def create_payment_order(
             raise RegistrationConflict("The selected ticket offer is unavailable.")
         if tier.currency != "INR":
             raise RegistrationConflict("PayU checkout is currently available for INR offers only.")
-        if len(attendee_names) != tier.admission_count:
+        admission_quantity = quantity * tier.admission_count
+        if len(attendee_names) != admission_quantity:
             raise serializers.ValidationError(
                 {
                     "attendee_names": (
-                        f"Enter a name for each of the {tier.admission_count} attendees."
+                        f"Enter a name for each of the {admission_quantity} attendees."
                     )
                 }
             )
@@ -321,6 +322,7 @@ def create_payment_order(
                     buyer_organization=buyer.get("organization", "").strip(),
                     buyer_job_title=buyer.get("job_title", "").strip(),
                     attendee_names=[name.strip() for name in attendee_names],
+                    quantity=quantity,
                     expires_at=timezone.now() + ORDER_LIFETIME,
                 )
                 is_new_intent = True
@@ -382,10 +384,12 @@ def create_payment_order(
                 | Q(status=PaymentIntent.Status.REVIEW_REQUIRED)
             )
             .exclude(pk=idempotency_key)
-            .aggregate(total=Sum("ticket_tier__admission_count"))["total"]
+            .aggregate(
+                total=Sum(F("ticket_tier__admission_count") * F("quantity"))
+            )["total"]
             or 0
         )
-        if active_ticket_count + reserved_count + tier.admission_count > event.capacity:
+        if active_ticket_count + reserved_count + admission_quantity > event.capacity:
             raise RegistrationConflict(
                 "Not enough event capacity remains for this ticket offer."
             )
@@ -395,8 +399,8 @@ def create_payment_order(
         intent.expires_at = expires_at
         intent.save(update_fields=("status", "expires_at", "updated_at"))
         amount = (
-            int(tier.price * 100)
-            + ADDITIONAL_CHARGE_PER_ADMISSION_PAISE * tier.admission_count
+            int(tier.price * 100) * quantity
+            + ADDITIONAL_CHARGE_PER_ADMISSION_PAISE * admission_quantity
         )
         payment = Payment.objects.create(
             intent=intent,
@@ -1093,9 +1097,12 @@ def _issue_verified_payment(txnid, *, allow_review_retry=False):
                         },
                         source=Registration.Source.ONLINE,
                         attendee_names=intent.attendee_names,
+                        quantity=intent.quantity,
                         exclude_payment_intent_id=intent.idempotency_key,
                     )
-                    if len(tickets) != intent.ticket_tier.admission_count:
+                    if len(tickets) != (
+                        intent.quantity * intent.ticket_tier.admission_count
+                    ):
                         raise RuntimeError(
                             "Ticket issuance did not create the required admission count."
                         )
@@ -1134,6 +1141,9 @@ def _issue_verified_payment(txnid, *, allow_review_retry=False):
                         "ticket_ids": [str(ticket.id) for ticket in tickets],
                     },
                 )
+                from .sheets import ensure_ticket_sheet_syncs
+
+                ensure_ticket_sheet_syncs(registration, tickets)
                 serialized = RegistrationSerializer(registration).data
                 result = {
                     "payment_verified": True,
@@ -1160,9 +1170,7 @@ def _issue_verified_payment(txnid, *, allow_review_retry=False):
         )
         raise PaymentReviewRequired() from issue_error
 
-    result["delivery_status"] = TicketDelivery.objects.filter(
-        ticket__registration_id=intent.registration_id
-    ).values_list("status", flat=True).first()
+    result["delivery_status"] = "DISABLED"
     return result
 
 
@@ -1401,7 +1409,10 @@ def get_payment_review_dashboard():
         ))
         | ~Q(verification_status=Payment.VerificationStatus.VERIFIED)
         | Q(intent__registration__isnull=True)
-        | ~Q(ticket_count=F("intent__ticket_tier__admission_count"))
+        | ~Q(
+            ticket_count=F("intent__ticket_tier__admission_count")
+            * F("intent__quantity")
+        )
         | Q(captured_for_intent__gt=1)
     )
     payment_review_queryset = captured_payment_queryset.filter(needs_review)
@@ -1419,7 +1430,10 @@ def get_payment_review_dashboard():
                 ))
                 | ~Q(verification_status=Payment.VerificationStatus.VERIFIED)
                 | Q(intent__registration__isnull=True)
-                | ~Q(ticket_count=F("intent__ticket_tier__admission_count"))
+                | ~Q(
+                    ticket_count=F("intent__ticket_tier__admission_count")
+                    * F("intent__quantity")
+                )
             ),
         ),
         TICKET_ISSUANCE_FAILED=Count(
@@ -1439,7 +1453,10 @@ def get_payment_review_dashboard():
             filter=Q(status=Payment.Status.CAPTURED)
             & (
                 Q(intent__registration__isnull=True)
-                | ~Q(ticket_count=F("intent__ticket_tier__admission_count"))
+                | ~Q(
+                    ticket_count=F("intent__ticket_tier__admission_count")
+                    * F("intent__quantity")
+                )
             ),
         ),
         DUPLICATE_PAYMENT=Count(
@@ -1476,7 +1493,8 @@ def get_payment_review_dashboard():
             issue_codes.append("PAYMENT_CAPTURED_WITHOUT_TICKET")
         if payment.status == Payment.Status.CAPTURED and (
             registration is None
-            or payment.ticket_count != intent.ticket_tier.admission_count
+            or payment.ticket_count
+            != intent.quantity * intent.ticket_tier.admission_count
         ):
             issue_codes.append("PAYMENT_CAPTURED_WITH_INCOMPLETE_REGISTRATION")
         if (
@@ -1510,7 +1528,9 @@ def get_payment_review_dashboard():
                         registration.registration_code if registration else None
                     ),
                     "ticket_count": payment.ticket_count,
-                    "expected_ticket_count": intent.ticket_tier.admission_count,
+                    "expected_ticket_count": (
+                        intent.quantity * intent.ticket_tier.admission_count
+                    ),
                     "verification_status": payment.verification_status,
                     "ticket_issuance_status": payment.ticket_issuance_status,
                     "failure": payment.ticket_issuance_failure or payment.failure_message,
@@ -1554,7 +1574,10 @@ def get_payment_review_dashboard():
             "buyer_name": registration.buyer_name,
             "buyer_email": registration.buyer_email,
             "ticket_count": registration.ticket_count,
-            "expected_ticket_count": registration.ticket_tier.admission_count,
+            "expected_ticket_count": (
+                registration.payment_intent.quantity
+                * registration.ticket_tier.admission_count
+            ),
             "created_at": registration.created_at.isoformat(),
             "issue_code": "TICKET_WITHOUT_VALID_PAYMENT",
         }

@@ -4,7 +4,6 @@ import {
   LayoutDashboard,
   Users,
   Ticket,
-  ScanLine,
   BarChart3,
   Flower2,
   Menu,
@@ -12,7 +11,6 @@ import {
   ExternalLink,
   ChevronRight,
   LogOut,
-  Mail,
   CreditCard,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -48,9 +46,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
     { label: 'Overview', href: '/admin', icon: LayoutDashboard },
     { label: 'Registrations', href: '/admin/registrations', icon: Users },
     { label: 'Tickets', href: '/admin/tickets', icon: Ticket },
-    { label: 'Scan History', href: '/admin/scans', icon: ScanLine },
     { label: 'Analytics & Reports', href: '/admin/reports', icon: BarChart3 },
-    { label: 'Email Delivery', href: '/admin/email-delivery', icon: Mail },
     { label: 'Payment Review', href: '/admin/payment-review', icon: CreditCard },
   ];
 
@@ -109,12 +105,6 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
             >
               <span>Open Scanner</span>
               <ExternalLink className="w-3 h-3" />
-            </Link>
-            <Link
-              to="/staff/register"
-              className="text-[11px] text-slate-400 hover:text-slate-200"
-            >
-              On-Spot Desk
             </Link>
           </div>
           <button

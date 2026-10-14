@@ -5,6 +5,7 @@ urlpatterns = [
     path("", include("apps.events.urls")),
     path("", include("apps.registrations.urls")),
     path("", include("apps.tickets.urls")),
+    path("", include("apps.tickets.college_urls")),
     path("", include("apps.scanning.urls")),
     path("", include("apps.payments.urls")),
 ]

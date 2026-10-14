@@ -16,10 +16,6 @@ class IsAdministrator(HasRole):
     allowed_roles = ("ADMIN",)
 
 
-class CanRegisterOnSpot(HasRole):
-    allowed_roles = ("ADMIN", "REGISTRATION_STAFF")
-
-
 class CanScan(HasRole):
     allowed_roles = ("ADMIN", "SCANNER_STAFF")
 

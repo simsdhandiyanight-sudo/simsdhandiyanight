@@ -1,15 +1,13 @@
-import hmac
 import logging
 from urllib.parse import urlencode
 
 from django.conf import settings
-from django.db import transaction
 from django.http import HttpResponse, HttpResponseRedirect
 from django.urls import reverse
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_protect
 from rest_framework import parsers, serializers, status
-from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
+from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -17,8 +15,7 @@ from rest_framework.views import APIView
 from apps.accounts.permissions import IsAdministrator
 from apps.audit.models import AuditLog
 from apps.registrations.serializers import CreateRegistrationSerializer
-from .delivery import get_delivery_dashboard, handle_brevo_webhook
-from .models import Payment, TicketDelivery
+from .models import Payment, PaymentIntent
 from .proof import (
     approve_manual_payment,
     generate_payment_proof_confirmation_pdf,
@@ -26,7 +23,6 @@ from .proof import (
     get_payment_proof_status,
     payment_proof_screenshot,
     reject_manual_payment,
-    retry_payment_rejection_email,
     start_payment_proof_registration,
     submit_payment_proof,
     validate_payment_proof_image,
@@ -77,6 +73,7 @@ class PayUCreatePaymentView(APIView):
             idempotency_key=get_idempotency_key(request),
             event_id=validated["event_id"],
             tier_id=validated["ticket_tier_id"],
+            quantity=validated["quantity"],
             buyer=validated["buyer"],
             attendee_names=attendee_names,
             success_url=settings.PAYU_SUCCESS_URL
@@ -104,6 +101,7 @@ class PaymentProofRegistrationView(APIView):
             idempotency_key=get_idempotency_key(request),
             event_id=validated["event_id"],
             tier_id=validated["ticket_tier_id"],
+            quantity=validated["quantity"],
             buyer=validated["buyer"],
             attendee_names=validated.get("attendee_names")
             or [validated["buyer"]["name"]],
@@ -214,6 +212,55 @@ class PaymentProofConfirmationView(APIView):
         return response
 
 
+class PaymentProofTicketsPdfView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def get(self, request, registration_id):
+        access_token = request.headers.get("X-Proof-Access-Token", "")
+        try:
+            access_token = serializers.UUIDField().run_validation(access_token)
+        except serializers.ValidationError as error:
+            raise NotFound("The issued tickets were not found.") from error
+        intent = PaymentIntent.objects.select_related(
+            "registration__event",
+            "registration__ticket_tier",
+        ).filter(
+            registration_id=registration_id,
+            proof_access_token=access_token,
+            status=PaymentIntent.Status.VERIFIED,
+            registration__status="TICKET_ISSUED",
+        ).first()
+        if intent is None or not Payment.objects.filter(
+            intent=intent,
+            provider=Payment.Provider.UPI_MANUAL,
+            status=Payment.Status.VERIFIED,
+            verification_status=Payment.VerificationStatus.VERIFIED,
+            ticket_issuance_status=Payment.TicketIssuanceStatus.ISSUED,
+            verified_at__isnull=False,
+        ).exists():
+            raise NotFound("The issued tickets were not found.")
+        tickets = list(
+            intent.registration.tickets.filter(status="ISSUED").order_by("ticket_code")
+        )
+        expected_count = (
+            intent.quantity * intent.registration.ticket_tier.admission_count
+        )
+        if not tickets or len(tickets) != expected_count:
+            raise NotFound("The issued tickets were not found.")
+        from apps.payments.pdf import generate_tickets_pdf
+
+        response = HttpResponse(
+            generate_tickets_pdf(tickets),
+            content_type="application/pdf",
+        )
+        response["Content-Disposition"] = (
+            f'attachment; filename="tickets-{intent.registration.registration_code}.pdf"'
+        )
+        response["Cache-Control"] = "no-store, private"
+        return response
+
+
 class PaymentProofDashboardView(APIView):
     permission_classes = [IsAuthenticated, IsAdministrator]
 
@@ -273,14 +320,6 @@ class PaymentProofRejectView(APIView):
         ))
 
 
-class PaymentProofRejectionEmailRetryView(APIView):
-    permission_classes = [IsAuthenticated, IsAdministrator]
-
-    @method_decorator(csrf_protect)
-    def post(self, request, payment_id):
-        return Response(retry_payment_rejection_email(payment_id=payment_id))
-
-
 class PayUCallbackView(APIView):
     permission_classes = [AllowAny]
     authentication_classes = []
@@ -330,58 +369,6 @@ class PayUPaymentStatusView(APIView):
         return response
 
 
-class TicketDeliveryRetryView(APIView):
-    permission_classes = [IsAuthenticated, IsAdministrator]
-
-    @method_decorator(csrf_protect)
-    def post(self, request, delivery_id):
-        with transaction.atomic():
-            try:
-                delivery = TicketDelivery.objects.select_for_update().get(
-                    pk=delivery_id
-                )
-            except TicketDelivery.DoesNotExist as error:
-                raise NotFound("Ticket email delivery was not found.") from error
-            if delivery.status in (
-                TicketDelivery.Status.SENDING,
-                TicketDelivery.Status.SENT,
-                TicketDelivery.Status.DELIVERED,
-                TicketDelivery.Status.RECONCILIATION_REQUIRED,
-            ):
-                raise ValidationError(
-                    {"status": "Only failed or pending ticket emails can be queued."}
-                )
-            if delivery.status == TicketDelivery.Status.FAILED:
-                delivery.status = TicketDelivery.Status.PENDING
-                delivery.failure_reason = ""
-                delivery.failed_at = None
-                delivery.retry_after = None
-                delivery.save(
-                    update_fields=(
-                        "status",
-                        "failure_reason",
-                        "failed_at",
-                        "retry_after",
-                        "updated_at",
-                    )
-                )
-        return Response(
-            {
-                "status": TicketDelivery.Status.PENDING,
-                "attempt_count": delivery.attempt_count,
-                "queued": True,
-            },
-            status=status.HTTP_202_ACCEPTED,
-        )
-
-
-class TicketDeliveryDashboardView(APIView):
-    permission_classes = [IsAuthenticated, IsAdministrator]
-
-    def get(self, request):
-        return Response(get_delivery_dashboard())
-
-
 class PaymentReviewDashboardView(APIView):
     permission_classes = [IsAuthenticated, IsAdministrator]
 
@@ -417,61 +404,3 @@ class PaymentReconcileView(APIView):
             requested_by=request.user,
         )
         return Response(result)
-
-
-class TicketDeliveryPriorityView(APIView):
-    permission_classes = [IsAuthenticated, IsAdministrator]
-
-    @method_decorator(csrf_protect)
-    def patch(self, request, delivery_id):
-        serializer = TicketDeliveryPrioritySerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        with transaction.atomic():
-            try:
-                delivery = TicketDelivery.objects.select_for_update().get(
-                    pk=delivery_id
-                )
-            except TicketDelivery.DoesNotExist as error:
-                raise NotFound("Ticket email delivery was not found.") from error
-            if delivery.status not in (
-                TicketDelivery.Status.PENDING,
-                TicketDelivery.Status.FAILED,
-            ):
-                raise ValidationError(
-                    {"status": "Priority can only be changed before sending."}
-                )
-            delivery.priority = serializer.validated_data["priority"]
-            delivery.save(update_fields=("priority", "updated_at"))
-        return Response({"id": str(delivery.id), "priority": delivery.priority})
-
-
-class BrevoWebhookView(APIView):
-    permission_classes = [AllowAny]
-    authentication_classes = []
-
-    def post(self, request):
-        configured_token = settings.BREVO_WEBHOOK_TOKEN
-        supplied_token = request.headers.get("X-Brevo-Webhook-Token", "")
-        if not configured_token or not hmac.compare_digest(
-            supplied_token,
-            configured_token,
-        ):
-            raise PermissionDenied("The Brevo webhook token is invalid.")
-        event_name = request.data.get("event")
-        message_id = request.data.get("message-id") or request.data.get("messageId")
-        if not isinstance(event_name, str) or not isinstance(message_id, str):
-            raise ValidationError(
-                {"detail": "The webhook must include event and message-id fields."}
-            )
-        matched = handle_brevo_webhook(
-            message_id=message_id,
-            event_name=event_name,
-        )
-        return Response(
-            {"processed": matched},
-            status=status.HTTP_200_OK if matched else status.HTTP_202_ACCEPTED,
-        )
-
-
-class TicketDeliveryPrioritySerializer(serializers.Serializer):
-    priority = serializers.ChoiceField(choices=TicketDelivery.Priority.choices)

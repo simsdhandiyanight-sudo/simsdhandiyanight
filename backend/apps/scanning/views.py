@@ -16,10 +16,11 @@ from apps.accounts.permissions import CanScan, IsAdministrator
 from apps.events.models import Event
 from apps.payments.models import Payment, PaymentIntent
 from apps.registrations.models import Registration
-from apps.tickets.models import Ticket
+from apps.tickets.models import CollegeStudentTicket, Ticket
 from .models import TicketScan
 from .serializers import (
     ScanRequestSerializer,
+    ScannedCollegeStudentTicketSerializer,
     ScannedTicketSerializer,
     TicketScanSerializer,
 )
@@ -66,6 +67,11 @@ class ScanListCreateView(APIView):
                         context={"request": request},
                     ).data
                     if scan.ticket_id
+                    else ScannedCollegeStudentTicketSerializer(
+                        scan.college_ticket,
+                        context={"request": request},
+                    ).data
+                    if scan.college_ticket_id
                     else None
                 ),
                 "scan_record": TicketScanSerializer(scan).data,
@@ -82,6 +88,7 @@ class ScanListCreateView(APIView):
 
         scans = TicketScan.objects.select_related(
             "ticket__registration",
+            "college_ticket",
             "event",
             "gate",
             "scanned_by",
@@ -110,6 +117,8 @@ class ScanListCreateView(APIView):
                 Q(ticket__id__icontains=search)
                 | Q(ticket__registration__buyer_name__icontains=search)
                 | Q(ticket__attendee_name__icontains=search)
+                | Q(college_ticket__student_name__icontains=search)
+                | Q(college_ticket__ticket_code__icontains=search)
                 | Q(gate__name__icontains=search)
                 | Q(scanned_by__name__icontains=search)
             )
@@ -148,6 +157,7 @@ class DashboardSummaryView(APIView):
 
         registrations = Registration.objects.filter(event=event)
         tickets = Ticket.objects.filter(registration__event=event)
+        college_tickets = CollegeStudentTicket.objects.filter(event=event)
         scans = TicketScan.objects.filter(event=event)
 
         reg_stats = registrations.aggregate(
@@ -180,6 +190,11 @@ class DashboardSummaryView(APIView):
                 ),
             ),
         )
+        college_ticket_stats = college_tickets.aggregate(
+            active=Count("id", filter=~Q(status=CollegeStudentTicket.Status.CANCELLED)),
+            used=Count("id", filter=Q(status=CollegeStudentTicket.Status.USED)),
+            cancelled=Count("id", filter=Q(status=CollegeStudentTicket.Status.CANCELLED)),
+        )
         scan_results = list(
             scans.values("result")
             .annotate(count=Count("id"))
@@ -198,9 +213,9 @@ class DashboardSummaryView(APIView):
                 "online_registrations": reg_stats["online"] or 0,
                 "on_spot_registrations": reg_stats["on_spot"] or 0,
                 "paid_online_tickets": ticket_stats["paid_online"] or 0,
-                "active_tickets": ticket_stats["active"] or 0,
-                "used_tickets": ticket_stats["used"] or 0,
-                "cancelled_tickets": ticket_stats["cancelled"] or 0,
+                "active_tickets": (ticket_stats["active"] or 0) + (college_ticket_stats["active"] or 0),
+                "used_tickets": (ticket_stats["used"] or 0) + (college_ticket_stats["used"] or 0),
+                "cancelled_tickets": (ticket_stats["cancelled"] or 0) + (college_ticket_stats["cancelled"] or 0),
                 "scan_attempts": scan_attempts,
                 "entry_granted": entry_granted,
                 "scan_results": scan_results,

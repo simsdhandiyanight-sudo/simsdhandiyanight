@@ -39,6 +39,7 @@ export const RegistrationPage: React.FC = () => {
   const [organization, setOrganization] = useState('');
   const [jobTitle, setJobTitle] = useState('');
   const [selectedTierId, setSelectedTierId] = useState<string>('');
+  const [quantity, setQuantity] = useState(1);
   const [attendeeNames, setAttendeeNames] = useState<string[]>([]);
   const [agreeTerms, setAgreeTerms] = useState(false);
   const [readTerms, setReadTerms] = useState(false);
@@ -102,6 +103,8 @@ export const RegistrationPage: React.FC = () => {
     event.status === 'open' &&
     event.registeredCount < event.capacity &&
     event.tiers.some((tier) => availablePackages(tier) > 0);
+  const maxQuantity = selectedTier ? availablePackages(selectedTier) : 1;
+  const ticketCount = quantity * selectedAdmissionCount;
 
   const clearFieldError = (field: string) => {
     setFieldErrors((current) => {
@@ -160,13 +163,17 @@ export const RegistrationPage: React.FC = () => {
   };
 
   const handleReviewTier = () => {
-    if (selectedTier && selectedAdmissionCount > 1) {
-      const names = [fullName, ...attendeeNames.slice(0, selectedAdmissionCount - 1)];
+    if (selectedTier && quantity > 0 && quantity <= maxQuantity && selectedAdmissionCount > 1) {
+      const names = [fullName, ...attendeeNames.slice(0, ticketCount - 1)];
       const hasInvalidName = names.some((name) => getFieldError('fullName', name));
       if (hasInvalidName) {
-        setErrorMessage(`Enter a valid name for each of the ${selectedAdmissionCount} attendees.`);
+        setErrorMessage(`Enter a valid name for each of the ${ticketCount} attendees.`);
         return;
       }
+    }
+    if (quantity < 1 || quantity > maxQuantity) {
+      setErrorMessage('The selected quantity is no longer available. Choose an available quantity.');
+      return;
     }
     setErrorMessage('');
     setStep(3);
@@ -199,6 +206,7 @@ export const RegistrationPage: React.FC = () => {
       const registrationParams = {
         eventId: event.id,
         tierId: selectedTier.id,
+        quantity,
         source: 'ONLINE' as const,
         attendee: {
           fullName: buyer.name,
@@ -209,8 +217,8 @@ export const RegistrationPage: React.FC = () => {
         },
         attendeeNames:
           selectedAdmissionCount > 1
-            ? [fullName, ...attendeeNames.slice(0, selectedAdmissionCount - 1)]
-            : [fullName],
+            ? [fullName, ...attendeeNames.slice(0, ticketCount - 1)]
+            : Array.from({ length: ticketCount }, () => fullName),
       };
       const reservation = await paymentsApi.startProofRegistration(registrationParams);
       await clearRegistrationIdempotencyKey(registrationParams);
@@ -357,7 +365,7 @@ export const RegistrationPage: React.FC = () => {
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   />
                   <p className="mt-1.5 text-[10px] text-slate-400">
-                    Please provide a valid email ID, as your ticket will be received on this email.
+                    Your email is used for registration and payment-status access.
                   </p>
                   {fieldErrors.email && (
                     <p id="attendee-email-error" className="text-xs text-rose-400 mt-1">{fieldErrors.email}</p>
@@ -460,7 +468,13 @@ export const RegistrationPage: React.FC = () => {
                   <button
                     type="button"
                     key={tier.id}
-                    onClick={() => setSelectedTierId(tier.id)}
+                    onClick={() => {
+                      if (tier.id !== selectedTierId) {
+                        setSelectedTierId(tier.id);
+                        setQuantity(1);
+                        setAttendeeNames([]);
+                      }
+                    }}
                     disabled={tier.available < 1}
                     aria-pressed={isSelected}
                     className={`w-full p-4 rounded-xl border text-left transition-all disabled:cursor-not-allowed disabled:opacity-50 ${
@@ -507,20 +521,58 @@ export const RegistrationPage: React.FC = () => {
               })}
             </div>
 
+            {selectedTier && (
+              <section className="rounded-xl border border-slate-800 bg-slate-950 p-4" aria-label="Ticket quantity">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold text-white">Ticket quantity</h3>
+                    <p className="mt-1 text-xs text-slate-400">
+                      {selectedAdmissionCount} admission{selectedAdmissionCount === 1 ? '' : 's'} per offer · ₹{selectedTier.price} per offer
+                    </p>
+                  </div>
+                  <div className="inline-flex items-center gap-3 self-start rounded-xl border border-slate-700 bg-slate-900 p-1 sm:self-auto">
+                    <button
+                      type="button"
+                      aria-label="Decrease quantity"
+                      onClick={() => setQuantity((current) => Math.max(1, current - 1))}
+                      disabled={quantity <= 1}
+                      className="h-9 w-9 rounded-lg bg-rose-700 text-lg font-bold text-white transition-colors hover:bg-rose-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:ring-offset-2 focus-visible:ring-offset-amber-50 disabled:cursor-not-allowed disabled:opacity-55"
+                    >
+                      −
+                    </button>
+                    <span aria-live="polite" className="min-w-6 text-center text-sm font-bold text-white">{quantity}</span>
+                    <button
+                      type="button"
+                      aria-label="Increase quantity"
+                      onClick={() => setQuantity((current) => Math.min(maxQuantity, current + 1))}
+                      disabled={quantity >= maxQuantity}
+                      className="h-9 w-9 rounded-lg bg-rose-700 text-lg font-bold text-white transition-colors hover:bg-rose-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:ring-offset-2 focus-visible:ring-offset-amber-50 disabled:cursor-not-allowed disabled:opacity-55"
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+                <div className="mt-3 flex justify-between border-t border-slate-800 pt-3 text-xs">
+                  <span className="text-slate-400">Total · {ticketCount} admission{ticketCount === 1 ? '' : 's'}</span>
+                  <span className="font-mono font-bold text-indigo-300">₹{(selectedTier.price * quantity).toLocaleString('en-IN')}</span>
+                </div>
+              </section>
+            )}
+
             {selectedTier && selectedAdmissionCount > 1 && (
               <section className="mt-6 border-t border-slate-800 pt-5" aria-labelledby="combo-attendees-heading">
                 <h3 id="combo-attendees-heading" className="text-sm font-bold text-white">
                   Attendee names <span className="text-rose-400">*</span>
                 </h3>
                 <p className="mt-1 text-xs text-slate-400">
-                  Enter the name for each of the {selectedAdmissionCount} individual tickets. Buyer email and mobile are shared.
+                  Enter the name for each of the {ticketCount} individual tickets. Buyer email and mobile are shared.
                 </p>
                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
                   <div>
                     <label className="mb-1.5 block text-xs font-semibold text-slate-300">Attendee 1 name</label>
                     <p className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-2.5 text-xs text-white">{fullName}</p>
                   </div>
-                  {Array.from({ length: selectedAdmissionCount - 1 }, (_, index) => (
+                  {Array.from({ length: ticketCount - 1 }, (_, index) => (
                     <div key={index}>
                       <label htmlFor={`combo-attendee-${index + 2}`} className="mb-1.5 block text-xs font-semibold text-slate-300">
                         Attendee {index + 2} name <span className="text-rose-400">*</span>
@@ -566,7 +618,7 @@ export const RegistrationPage: React.FC = () => {
               <button
                 type="button"
                 onClick={handleReviewTier}
-                disabled={!selectedTier || availablePackages(selectedTier) < 1}
+                disabled={!selectedTier || quantity > maxQuantity || availablePackages(selectedTier) < 1}
                 className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold inline-flex items-center gap-2 cursor-pointer transition-all shadow-md"
               >
                 <span>Review Registration</span>
@@ -627,11 +679,11 @@ export const RegistrationPage: React.FC = () => {
               <div className="pt-3 border-t border-slate-800 flex justify-between items-center text-xs">
                 <span className="text-slate-400">
                   {selectedAdmissionCount > 1
-                    ? `${selectedAdmissionCount - 1} tickets + 1 free • total`
-                    : 'Total'}
+                    ? `${quantity} combo offer${quantity === 1 ? '' : 's'} · ${ticketCount} admissions`
+                    : `${quantity} ticket${quantity === 1 ? '' : 's'} · ₹${selectedTier.price} each`}
                 </span>
                 <span className="text-lg font-bold font-mono text-white">
-                  ₹{selectedTier.price}
+                  ₹{(selectedTier.price * quantity).toLocaleString('en-IN')}
                 </span>
               </div>
             </div>

@@ -1,12 +1,6 @@
 import { ApiPage, Registration, Ticket } from '../types';
-import { ApiError, apiRequest, jsonBody } from './http';
+import { ApiError, apiRequest } from './http';
 import { ApiRegistration, ApiTicket, mapRegistration, mapTicket } from './serializers';
-
-interface RegistrationCreateResponse {
-  registration: ApiRegistration;
-  ticket: ApiTicket;
-  tickets: ApiTicket[];
-}
 
 export interface RegistrationFilters {
   page?: number;
@@ -25,21 +19,30 @@ export interface RegistrationCreateParams {
     jobTitle?: string;
   };
   attendeeNames?: string[];
+  quantity?: number;
   tierId: string;
-  source: 'ONLINE' | 'ON_SPOT';
+  source: 'ONLINE';
 }
+
+export const normalizeIndianPhone = (value: string): string => {
+  const digits = value.replace(/\D/g, '');
+  if (digits.length === 10) return `+91${digits}`;
+  if (digits.length === 12 && digits.startsWith('91')) return `+${digits}`;
+  return value.trim();
+};
 
 export const registrationRequest = (params: RegistrationCreateParams) => {
   const buyer = {
     name: params.attendee.fullName.trim(),
     email: params.attendee.email.trim().toLowerCase(),
-    phone: params.attendee.phone,
+    phone: normalizeIndianPhone(params.attendee.phone),
     organization: params.attendee.organization?.trim() || '',
     job_title: params.attendee.jobTitle?.trim() || '',
   };
   return {
     event_id: params.eventId,
     ticket_tier_id: params.tierId,
+    quantity: params.quantity ?? 1,
     buyer,
     attendee_names: (params.attendeeNames || [buyer.name]).map((name) => name.trim()),
   };
@@ -99,28 +102,4 @@ export const registrationsApi = {
     }
   },
 
-  create: async (params: {
-    eventId: string;
-    attendee: RegistrationCreateParams['attendee'];
-    attendeeNames?: string[];
-    tierId: string;
-    source: 'ONLINE' | 'ON_SPOT';
-  }): Promise<{ registration: Registration; ticket: Ticket; tickets: Ticket[] }> => {
-    const endpoint = params.source === 'ON_SPOT' ? '/registrations/on-spot/' : '/registrations/';
-    const request = registrationRequest(params);
-    const idempotencyKey = await registrationIdempotencyKey(params);
-
-    const response = await apiRequest<RegistrationCreateResponse>(endpoint, {
-      method: 'POST',
-      headers: { 'Idempotency-Key': idempotencyKey },
-      body: jsonBody(request),
-    });
-    await clearRegistrationIdempotencyKey(params);
-    const tickets = response.tickets.map(mapTicket);
-    return {
-      registration: mapRegistration(response.registration),
-      ticket: tickets[0],
-      tickets,
-    };
-  },
 };
