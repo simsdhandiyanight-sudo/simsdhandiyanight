@@ -20,7 +20,7 @@ const eventPath = '/events/dhandiya-night-2026';
 const eventGuidelines = [
   { title: 'On-the-Spot Ticket Sales', detail: 'Begin at 5:00 PM.' },
   { title: 'Event Start Time', detail: 'The celebrations will begin sharply at 6:00 PM.' },
-  { title: 'Reporting Time', detail: 'All attendees are requested to arrive and be inside the venue by 5:45 PM.' },
+  { title: 'Reporting Time', detail: 'All attendees are requested to arrive and be inside the venue by 5:00 PM.' },
   { title: 'Gate Closure', detail: 'Entry will close strictly at 7:00 PM.' },
   { title: 'Strict Entry Policy', detail: 'No entry will be permitted after the gates close at 7:00 PM, even for ticket holders with valid tickets.' },
   { title: 'One-Time Entry Policy', detail: 'Entry is permitted only once. Once an attendee exits the venue, re-entry will not be allowed under any circumstances.', highlighted: true },
@@ -112,6 +112,19 @@ export const LandingPage: React.FC = () => {
             </li>
           ))}
         </ul>
+        <section className="mt-4 rounded-lg border border-amber-400/40 bg-amber-950/30 p-3 text-sm leading-relaxed text-slate-100">
+          <h3 className="font-semibold text-amber-300">🎟️ Important Ticket Information</h3>
+          <p className="mt-2">
+            <strong>Online ticket sales close at 2:00 PM on 16th October 2026.</strong>
+          </p>
+          <p className="mt-1">
+            <strong>On-the-spot tickets will be available from 5:00 PM onwards at the venue.</strong>
+          </p>
+          <h3 className="mt-4 font-semibold text-amber-300">🚗 Parking Information</h3>
+          <p className="mt-2">
+            Car parking is available at the venue, subject to security checks and availability.
+          </p>
+        </section>
         <p className="mt-4 text-sm leading-relaxed text-slate-300">
           {eventGuidelinesClosing}
         </p>
@@ -186,6 +199,19 @@ export const LandingPage: React.FC = () => {
                 </li>
               ))}
             </ul>
+            <section className="mt-4 rounded-xl border border-amber-500/40 bg-amber-50/80 p-4 text-sm leading-relaxed text-slate-800">
+              <h3 className="font-semibold text-rose-900">🎟️ Important Ticket Information</h3>
+              <p className="mt-2">
+                <strong>Online ticket sales close at 2:00 PM on 16th October 2026.</strong>
+              </p>
+              <p className="mt-1">
+                <strong>On-the-spot tickets will be available from 5:00 PM onwards at the venue.</strong>
+              </p>
+              <h3 className="mt-4 font-semibold text-rose-900">🚗 Parking Information</h3>
+              <p className="mt-2">
+                Car parking is available at the venue, subject to security checks and availability.
+              </p>
+            </section>
             <p className="mt-4 border-t border-amber-800/15 pt-4 text-sm font-medium leading-relaxed text-rose-900">
               {eventGuidelinesClosing}
             </p>
