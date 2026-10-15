@@ -18,7 +18,6 @@ import { FEATURED_EVENT } from '../../mock/featuredEvent';
 const eventPath = '/events/dhandiya-night-2026';
 
 const eventGuidelines = [
-  { title: 'On-the-Spot Ticket Sales', detail: 'Begin at 5:00 PM.' },
   { title: 'Event Start Time', detail: 'The celebrations will begin sharply at 6:00 PM.' },
   { title: 'Reporting Time', detail: 'All attendees are requested to arrive and be inside the venue by 5:00 PM.' },
   { title: 'Gate Closure', detail: 'Entry will close strictly at 7:00 PM.' },
@@ -124,6 +123,25 @@ export const LandingPage: React.FC = () => {
           <p className="mt-2">
             Car parking is available at the venue, subject to security checks and availability.
           </p>
+          <h3 className="mt-4 font-semibold text-amber-300">📍 Venue Details</h3>
+          <p className="mt-2 font-semibold">Soundarya Institute of Management and Science</p>
+          <address className="mt-1 not-italic">
+            Soundarya Nagar, Sidedahalli, Nagasandra Post,
+            <br />
+            296, 9th Cross Road, Prakruthi Layout,
+            <br />
+            Siddeshwar Layout, Soundarya Layout,
+            <br />
+            Bengaluru, Karnataka – 560073.
+          </address>
+          <a
+            className="mt-2 inline-block font-semibold text-amber-300 underline hover:text-amber-200"
+            href="https://maps.app.goo.gl/1yx4m8NBTvXcoT2k9"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Click here for directions to the venue →
+          </a>
         </section>
         <p className="mt-4 text-sm leading-relaxed text-slate-300">
           {eventGuidelinesClosing}
@@ -211,6 +229,25 @@ export const LandingPage: React.FC = () => {
               <p className="mt-2">
                 Car parking is available at the venue, subject to security checks and availability.
               </p>
+              <h3 className="mt-4 font-semibold text-rose-900">📍 Venue Details</h3>
+              <p className="mt-2 font-semibold">Soundarya Institute of Management and Science</p>
+              <address className="mt-1 not-italic">
+                Soundarya Nagar, Sidedahalli, Nagasandra Post,
+                <br />
+                296, 9th Cross Road, Prakruthi Layout,
+                <br />
+                Siddeshwar Layout, Soundarya Layout,
+                <br />
+                Bengaluru, Karnataka – 560073.
+              </address>
+              <a
+                className="mt-2 inline-block font-semibold text-rose-900 underline hover:text-rose-700"
+                href="https://maps.app.goo.gl/1yx4m8NBTvXcoT2k9"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Click here for directions to the venue →
+              </a>
             </section>
             <p className="mt-4 border-t border-amber-800/15 pt-4 text-sm font-medium leading-relaxed text-rose-900">
               {eventGuidelinesClosing}
