@@ -182,7 +182,14 @@ const ManualPaymentProofPage: React.FC<{
                   Your payment proof has been submitted successfully. Your Ticket ID is{' '}
                   <strong>{details.ticket_id}</strong>. Please save this ID for future reference.
                   Your payment is awaiting admin verification. Once verified and issued, your
-                  admission ticket and QR code will be available to download from this secure page.
+                  ticket will be sent to your registered email address.
+                </p>
+                <p className="mt-3 rounded-lg border border-amber-400 bg-amber-100 p-3 font-semibold text-amber-950">
+                  Please check your email inbox and spam folder for your ticket.
+                </p>
+                <p className="mt-3">
+                  Your admission ticket and QR code will also be available to download from this
+                  secure page.
                 </p>
                 <p className="mt-3 text-xs text-amber-900">
                   The Ticket ID is only a tracking/reference identifier. It does not confirm
@@ -210,8 +217,11 @@ const ManualPaymentProofPage: React.FC<{
             {paymentVerified && (
               <section className="rounded-2xl border border-emerald-800 bg-emerald-950/30 p-6 text-sm text-emerald-100">
                 <p>
-                  Payment is verified. Tickets are not sent by email. Use the secure download
-                  below to save your issued admission ticket and QR code.
+                  Payment is verified. Your issued admission ticket and QR code have been sent to
+                  your registered email address. You can also use the secure download below.
+                </p>
+                <p className="mt-3 rounded-lg border border-emerald-700 bg-emerald-950/60 p-3 font-semibold text-emerald-100">
+                  Please check your email inbox and spam folder for your ticket.
                 </p>
               </section>
             )}
