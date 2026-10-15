@@ -39,7 +39,7 @@ export const Modal: React.FC<ModalProps> = ({
     <div
       role="dialog"
       aria-modal="true"
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6"
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto overscroll-contain p-3 sm:items-center sm:p-6"
     >
       {/* Backdrop */}
       <div
@@ -49,10 +49,10 @@ export const Modal: React.FC<ModalProps> = ({
 
       {/* Modal Surface */}
       <div
-        className={`relative w-full ${maxWidthClasses[maxWidth]} bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-6 overflow-hidden z-10 transition-all`}
+        className={`relative my-auto max-h-[calc(100dvh-1.5rem)] w-full ${maxWidthClasses[maxWidth]} overflow-y-auto overscroll-contain rounded-2xl border border-slate-800 bg-slate-900 p-4 shadow-2xl transition-all sm:p-6`}
       >
-        <div className="flex items-start justify-between mb-4">
-          <div>
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div className="min-w-0">
             <h3 className="text-lg font-semibold text-slate-100">{title}</h3>
             {description && (
               <p className="text-xs text-slate-400 mt-0.5">{description}</p>
@@ -60,7 +60,7 @@ export const Modal: React.FC<ModalProps> = ({
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-100 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+            className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-100"
             aria-label="Close dialog"
           >
             <X className="w-4 h-4" />
