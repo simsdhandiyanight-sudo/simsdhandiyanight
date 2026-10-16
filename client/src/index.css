@@ -2669,6 +2669,39 @@ textarea {
   object-fit: contain;
 }
 
+.festival-home-spot-marquee {
+  position: relative;
+  z-index: 4;
+  width: min(100%, 1100px);
+  margin: 1.25rem auto 0;
+  overflow: hidden;
+  border: 1px solid rgba(232, 192, 89, 0.85);
+  border-radius: 999px;
+  color: #fff8e8;
+  background: linear-gradient(100deg, #86143f, #b71959 48%, #86143f);
+  box-shadow: 0 8px 24px rgba(83, 20, 48, 0.2);
+}
+
+.festival-home-spot-marquee__track {
+  display: flex;
+  width: max-content;
+  animation: festival-spot-marquee 22s linear infinite;
+}
+
+.festival-home-spot-marquee__track span {
+  flex: 0 0 auto;
+  padding: 0.65rem 2.5rem;
+  font-size: clamp(1.25rem, 3vw, 2.25rem);
+  font-weight: 800;
+  line-height: 1.25;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+@keyframes festival-spot-marquee {
+  to { transform: translateX(-50%); }
+}
+
 .festival-home-poster__corner {
   position: absolute;
   z-index: 2;
@@ -3181,5 +3214,21 @@ textarea {
   .festival-home-poster .festival-poster {
     transform: none;
     transition: none;
+  }
+
+  .festival-home-spot-marquee__track {
+    width: 100%;
+    justify-content: center;
+    animation: none;
+  }
+
+  .festival-home-spot-marquee__track span {
+    padding-inline: 1rem;
+    text-align: center;
+    white-space: normal;
+  }
+
+  .festival-home-spot-marquee__track span:not(:first-child) {
+    display: none;
   }
 }

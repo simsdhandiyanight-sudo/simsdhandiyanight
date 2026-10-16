@@ -173,6 +173,14 @@ export const LandingPage: React.FC = () => {
             <FestivalPoster priority className="festival-poster--home" />
           </div>
 
+          <div className="festival-home-spot-marquee" role="region" aria-label="On-the-spot registration announcement">
+            <span className="sr-only">On-the-spot registrations are open from 5:00 PM.</span>
+            <div className="festival-home-spot-marquee__track" aria-hidden="true">
+              <span>On-the-spot registrations are open from 5:00 PM</span>
+              <span>On-the-spot registrations are open from 5:00 PM</span>
+            </div>
+          </div>
+
           <div className="festival-home-invitation">
             <div className="festival-home-invitation__details">
               <div className="festival-home-invitation__detail">
