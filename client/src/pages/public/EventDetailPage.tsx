@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { eventsApi, FEATURED_EVENT_SLUG } from '../../api/events';
 import { Navbar } from '../../components/common/Navbar';
 import { Footer } from '../../components/common/Footer';
@@ -12,7 +11,6 @@ import {
   Clock,
   MapPin,
   CheckCircle2,
-  ArrowRight,
   ChevronDown,
   ChevronUp,
 
@@ -22,7 +20,6 @@ import {
 export const EventDetailPage: React.FC = () => {
   const [openFaq, setOpenFaq] = useState<number | null>(0);
   const [event, setEvent] = useState<EventItem>(FEATURED_EVENT);
-  const [registrationAvailable, setRegistrationAvailable] = useState(false);
   const [eventApiError, setEventApiError] = useState('');
 
   useEffect(() => {
@@ -34,10 +31,6 @@ export const EventDetailPage: React.FC = () => {
         return;
       }
       setEvent(backendEvent);
-      setRegistrationAvailable(
-        backendEvent.status === 'open'
-        && backendEvent.tiers.some((tier) => tier.available > 0),
-      );
     }).catch((error: unknown) => {
       if (cancelled) return;
       setEventApiError(
@@ -66,8 +59,8 @@ export const EventDetailPage: React.FC = () => {
                     Soundarya Institute
                   </span>
                   <span className="text-slate-600">·</span>
-                  <span className={`font-mono ${registrationAvailable ? 'text-emerald-400' : 'text-indigo-300'}`}>
-                    {registrationAvailable ? '● REGISTRATION OPEN' : 'EVENT INFORMATION'}
+                  <span className="font-mono text-rose-300">
+                    ONLINE REGISTRATION CLOSED
                   </span>
                 </div>
 
@@ -108,19 +101,13 @@ export const EventDetailPage: React.FC = () => {
 
                 {/* Main CTA */}
                 <div className="flex flex-wrap items-center gap-4 pt-2">
-                  {registrationAvailable ? (
-                    <Link
-                      to="/register"
-                      className="px-8 py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold text-sm tracking-wide shadow-lg shadow-indigo-600/30 transition-all hover:translate-y-[-1px] inline-flex items-center gap-2 uppercase"
-                    >
-                      <span>Reserve your pass</span>
-                      <ArrowRight className="w-4 h-4" />
-                    </Link>
-                  ) : (
-                    <p role={eventApiError ? 'status' : undefined} className="text-sm text-slate-400">
-                      {eventApiError || 'Checking ticket availability…'}
+                  <div className="space-y-1">
+                    <p className="text-sm font-semibold text-rose-300">Online registrations are closed.</p>
+                    <p className="text-sm text-slate-300">
+                      On-the-spot tickets will be available from 5:00 PM onwards at the venue.
                     </p>
-                  )}
+                    {eventApiError && <p role="status" className="text-xs text-amber-300">{eventApiError}</p>}
+                  </div>
                 </div>
               </div>
 
@@ -248,7 +235,7 @@ export const EventDetailPage: React.FC = () => {
                 <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-5">
                   <div className="flex items-center justify-between pb-4 border-b border-slate-800">
                     <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
-                      AVAILABLE PASS TIERS
+                      PASS INFORMATION
                     </span>
                     <span className="text-xs font-mono text-emerald-400">Immediate Issuance</span>
                   </div>
@@ -281,28 +268,15 @@ export const EventDetailPage: React.FC = () => {
                                 : `${tier.available} tickets left`
                               : 'Sold out'}
                           </span>
-                          {registrationAvailable && tier.available > 0 && (
-                            <Link
-                              to={`/register?tier=${tier.id}`}
-                              className="text-indigo-400 hover:text-indigo-300 font-semibold"
-                            >
-                              Select Tier &rarr;
-                            </Link>
-                          )}
                         </div>
                       </div>
                     ))}
                   </div>
 
-                  {registrationAvailable && (
-                    <Link
-                      to="/register"
-                      className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-md shadow-indigo-600/30 transition-all"
-                    >
-                      <span>REGISTER NOW</span>
-                      <ArrowRight className="w-4 h-4" />
-                    </Link>
-                  )}
+                  <p className="rounded-xl border border-rose-400/30 bg-rose-950/20 p-4 text-sm leading-relaxed text-rose-100">
+                    Online registrations are closed. On-the-spot tickets will be available from
+                    5:00 PM onwards at the venue.
+                  </p>
                 </div>
 
                 <div className="p-4 bg-slate-900/60 border border-slate-800/80 rounded-2xl text-xs text-slate-400 space-y-2">

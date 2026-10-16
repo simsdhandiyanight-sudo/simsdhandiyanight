@@ -804,6 +804,15 @@ textarea {
   transition: color 180ms ease, background-color 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
 }
 
+.festival-nav__link--closed {
+  width: 154px;
+  flex-basis: 154px;
+  padding-right: 0.75rem;
+  padding-left: 0.75rem;
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
 .festival-nav__link::after {
   position: absolute;
   right: 25%;

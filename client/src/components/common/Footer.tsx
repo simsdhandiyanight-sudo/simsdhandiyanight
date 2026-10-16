@@ -45,7 +45,7 @@ export const Footer: React.FC = () => {
               </li>
               <li>
                 <Link to="/register" className="hover:text-white transition-colors">
-                  Register Now
+                  Online Registration Closed
                 </Link>
               </li>
             </ul>

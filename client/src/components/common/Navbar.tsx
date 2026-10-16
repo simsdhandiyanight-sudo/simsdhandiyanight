@@ -5,7 +5,7 @@ import { Menu, X } from 'lucide-react';
 const navLinks = [
   { label: 'Home', href: '/', isActive: (pathname: string, hash: string) => pathname === '/' && !hash },
   { label: 'Event', href: '/events/dhandiya-night-2026', isActive: (pathname: string) => pathname === '/events/dhandiya-night-2026' },
-  { label: 'Register', href: '/register', isActive: (pathname: string) => pathname.startsWith('/register') },
+  { label: 'Registration Closed', href: '/register', isActive: (pathname: string) => pathname.startsWith('/register') },
   { label: 'About', href: '/about', isActive: (pathname: string) => pathname === '/about' },
 ];
 
@@ -33,7 +33,7 @@ export const Navbar: React.FC = () => {
         {index === 2 && !mobile && <span className="festival-nav__ornament" aria-hidden="true">✦</span>}
         <Link
           to={href}
-          className={`${mobile ? 'festival-nav__drawer-link' : 'festival-nav__link'}${active ? ' is-active' : ''}`}
+          className={`${mobile ? 'festival-nav__drawer-link' : 'festival-nav__link'}${!mobile && label === 'Registration Closed' ? ' festival-nav__link--closed' : ''}${active ? ' is-active' : ''}`}
           aria-current={active ? 'page' : undefined}
           onClick={mobile ? () => setIsOpen(false) : undefined}
         >

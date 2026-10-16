@@ -232,10 +232,10 @@ const ManualPaymentProofPage: React.FC<{
               && !paymentVerified
               && details.registration_status === 'EXPIRED' && (
                 <section className="rounded-2xl border border-rose-800 bg-rose-950/30 p-6 text-sm text-rose-100">
-                  This reservation has expired and the inventory was released. Please start a new
-                  registration if tickets are still available.
-                  <Link to="/register" className="mt-4 inline-flex rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white">
-                    Start a new registration
+                  This reservation has expired and the inventory was released. Online registrations
+                  are closed; on-the-spot tickets will be available from 5:00 PM onwards at the venue.
+                  <Link to="/events/dhandiya-night-2026" className="mt-4 inline-flex rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white">
+                    View event details
                   </Link>
                 </section>
               )}

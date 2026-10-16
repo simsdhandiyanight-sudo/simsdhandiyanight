@@ -114,7 +114,7 @@ export const LandingPage: React.FC = () => {
         <section className="mt-4 rounded-lg border border-amber-400/40 bg-amber-950/30 p-3 text-sm leading-relaxed text-slate-100">
           <h3 className="font-semibold text-amber-300">🎟️ Important Ticket Information</h3>
           <p className="mt-2">
-            <strong>Online ticket sales close at 2:00 PM on 16th October 2026.</strong>
+            <strong>Online registrations are closed.</strong>
           </p>
           <p className="mt-1">
             <strong>On-the-spot tickets will be available from 5:00 PM onwards at the venue.</strong>
@@ -199,8 +199,7 @@ export const LandingPage: React.FC = () => {
             <p className="festival-home-invitation__tagline">Dance <i>•</i> Dandiya <i>•</i> Dhamaka</p>
             <div className="festival-home-invitation__actions">
               <Link to="/register" className="festival-invitation-button">
-                <span>Register Now</span>
-                <ArrowRight aria-hidden="true" />
+                <span>Online registrations are closed</span>
               </Link>
               <Link to={eventPath} className="festival-home-invitation__secondary">
                 Event Details
@@ -228,7 +227,7 @@ export const LandingPage: React.FC = () => {
             <section className="mt-4 rounded-xl border border-amber-500/40 bg-amber-50/80 p-4 text-sm leading-relaxed text-slate-800">
               <h3 className="font-semibold text-rose-900">🎟️ Important Ticket Information</h3>
               <p className="mt-2">
-                <strong>Online ticket sales close at 2:00 PM on 16th October 2026.</strong>
+                <strong>Online registrations are closed.</strong>
               </p>
               <p className="mt-1">
                 <strong>On-the-spot tickets will be available from 5:00 PM onwards at the venue.</strong>
@@ -380,8 +379,11 @@ export const LandingPage: React.FC = () => {
             <p>THE DANCE FLOOR IS CALLING</p>
             <h2>Be part of the <em>celebration.</em></h2>
             <Link to="/register" className="festival-invitation-button festival-invitation-button--light">
-              <span>Register Now</span><ArrowRight aria-hidden="true" />
+              <span>Online registrations are closed</span>
             </Link>
+            <p className="mt-3 text-sm font-semibold">
+              On-the-spot tickets will be available from 5:00 PM onwards at the venue.
+            </p>
           </div>
           <span className="festival-last-call__flower festival-last-call__flower--right" aria-hidden="true">✿</span>
         </section>
